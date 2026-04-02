@@ -12,3 +12,4 @@ backend/test/BFieldEquations.py
 node_modules/
 
 git_script/
+.ipynb_checkpoints/
