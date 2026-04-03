@@ -35,3 +35,11 @@ cd $(git rev-parse --show-toplevel)/fel-app/
 npm install
 npm run dev
 ```
+
+
+# test the results in backend
+## beamline_optimization.ipynb results
+```bash
+cd $(git rev-parse --show-toplevel)/backend/test
+jupyter nbconvert --to pdf --execute beamline_optimization.ipynb --output beamline_optimization_res.pdf
+```

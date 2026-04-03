@@ -1,14 +1,20 @@
 # Work finished
-Overall, python files have been converted to pytorch versions while keeping it executable with the same functionality.
-1. ✅complete the original repository setup, finish an instruction of [setup](../project_basics/project_setup.md)
+Overall, python files under `backend` have been converted to pytorch versions while keeping it executable with the same functionality.
 
-2. 
+
+## step 1
+- ✅complete the original repository setup, finish an instruction of [setup](../project_basics/project_setup.md)
+
+## step 2
 - ✅create a new branch `pytorch_transform`
-- ⏳have a clear grasp of the code architecture and each file's functionality[here](../backend/README.md)
+- ✅have a clear grasp of the code architecture and each file's functionality[here](../backend/README.md)
 - ✅record the chat with chatgpt-5.4 agent [here](../modify_summary/agent_interaction.md), and record its response 
 
-3.
-- ⏳briefly categorize the files under the backend folder [here](../modify_summary/file_category.md)
-- ⏳modify all relevant code, finish a summary of code modification [here](../modify_summary/code_modified.md)
-- ⏳give test cases for each modified file to ensure code is working, [here](../modify_test_cases)
+## step 3
+- ✅briefly categorize the files under the backend folder [here](../modify_summary/file_category.md)
+- ✅modify all relevant code, finish a summary of code modification [here](../modify_summary/code_modified.md)
+- ✅summarize potential code bugs under [here](../modify_summary/original_file_error.md)
 
+## step 4
+- ⏳go through the test code under `backend/test`
+- ✅give test cases for each modified file to ensure code is working, [here](../modify_test_cases)

@@ -5,6 +5,11 @@ This document marks which backend files should change for the PyTorch-oriented u
 
 The details of changed script can be visible in `../modify_test_cases.md` and `../modify_summary/file_details.md`
 
+# files category
+❌: certainly no need to change to pytorch
+✅: need to change to pytorch and finished
+⏳: need to change to pytorch but not finished yet
+❓: not sure whether change to pytorch can help, not changed yet
 
 ## 1) API Layer
 ### ❌`backend/felAPI.py`
@@ -20,6 +25,13 @@ changed functions
 - `backend` > `beamline.py`
 - `lattice` > `useMatrice`
 - `driftLattice` > `getSymbolicMatrice`
+- `Beamline` > `defineEndFrontPos`
+- `Beamline` > `interpolateData`
+- `Beamline` > `_testModeOrder2end`
+- `Beamline` > `_testModeOrder2front`
+- `Beamline` > `_endModel`
+- `Beamline` > `_frontModel`
+- `Beamline` > `reconfigureLine`
 
 
 ### ✅`backend/ebeam.py`
@@ -31,21 +43,21 @@ changed functions
 - `particles_in_ellipse`
 - `envelope`
 - `twiss_to_cov`
-- `cov_to_twiss`
+- `rotate_cov`
 - `gen_6d_from_twiss`
 
 
-### ✅`backend/physicalConstants.py`
-nothing to change
+### ❌`backend/physicalConstants.py`
+no need to change
 
 
 ## 3) Optimization
-### ❌`backend/beamOptimizer.py`
-nothing to change
+### ❓`backend/beamOptimizer.py`
+no need to change
 
 
-### ❌`backend/AlgebraicOptimization.py`
-nothing to change
+### ❓`backend/AlgebraicOptimization.py`
+no need to change
 
 
 
@@ -60,7 +72,7 @@ nothing to change
 - `plotScatteringPhoton` 
 - `photonEnergySpectrum`
 
-### ⏳`backend/beamUtility.py`
+### ✅`backend/beamUtility.py`
 - `chargePerMacropulse`
 - `getPowerDF`
 - `model_Bethe`

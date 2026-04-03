@@ -35,8 +35,8 @@ class lattice:
                       "proton": [m_p, Q, (m_p * C ** 2) * k_MeV]}
 
     # Relativistic gamma and beta factors, calculated based on current kinetic energy and rest energy
-    gamma = (1 + (E / E0))
-    beta = np.sqrt(1 - (1 / (gamma ** 2)))
+    gamma = torch.tensor(1 + (E / E0))
+    beta = torch.sqrt(1 - (1 / (gamma ** 2)))
 
     unitsF = 10 ** 6 # Units factor used for conversions from (keV) to (ns)
     color = 'none'  #Color of beamline element when graphed
@@ -92,7 +92,7 @@ class lattice:
         self.Q = charge
         self.E0 = restE
         self.gamma = (1 + (self.E/self.E0))
-        self.beta = np.sqrt(1-(1/(self.gamma**2)))
+        self.beta = torch.sqrt(1-(1/(self.gamma**2)))
 
     def changeBeamType(self, particleType, kineticE, beamSegments = None):
         '''
@@ -742,22 +742,36 @@ class Beamline:
 
 
     def __init__(self, line = []):
-        self.ORIGINFACTOR = 0.99
+        self.ORIGINFACTOR = torch.tensor(0.99)
 
         a = {'first order decay': (self._frontModel, self._endModel)} # must work on later
-        self.FRINGEDELTAZ = 0.01
+        self.FRINGEDELTAZ = torch.tensor(0.01)
 
         self.beamline = line
-        self.totalLen = 0
+        self.totalLen = torch.zeros(1)
         self.defineEndFrontPos()
 
     #  Invariant, call at end of all functions
     def defineEndFrontPos(self):
-        self.totalLen = 0
-        for seg in self.beamline:
-            seg.startPos = self.totalLen
-            self.totalLen += seg.length
-            seg.endPos = self.totalLen
+        """
+        Vectorized calculation of beamline positions using cumulative sums.
+        Replaces the Python 'for' loop with a single PyTorch pass.
+        """
+        lengths = torch.tensor([seg.length for seg in self.beamline])
+
+
+        end_positions = torch.cumsum(lengths, dim=0)
+
+
+        start_positions = torch.cat([torch.tensor([0.0]), end_positions[:-1]])
+
+
+        for i, seg in enumerate(self.beamline):
+            seg.startPos = start_positions[i].item()
+            seg.endPos = end_positions[i].item()
+
+
+        self.totalLen = end_positions[-1].item() if len(end_positions) > 0 else 0
 
     def findSegmentAtPos(self, pos):
         for i in range(len(self.beamline)):
@@ -771,7 +785,7 @@ class Beamline:
     def interpolateData(self, xData, yData, interval):
         rbf = interpolate.Rbf(xData, yData)
         totalLen = xData[-1] - xData[0]
-        xNew = np.linspace(xData[0], xData[-1], math.ceil(totalLen/interval) + 1)
+        xNew = torch.linspace(xData[0], xData[-1], math.ceil(totalLen/interval) + 1)
         yNew = rbf(xNew)
         return xNew, yNew
 
@@ -783,7 +797,7 @@ class Beamline:
     #     return endParams
 
     def _testModeOrder2end(self, x, origin, B0, a1, a2):
-        return B0/(1+np.exp((a1*(x - origin)) + (a2*(x-origin)**2)))
+        return B0/(1+torch.exp((a1*(x - origin)) + (a2*(x-origin)**2)))
 
     def testFrontFit(self, xData, yData, pos):
         endParams, _ = optimize.curve_fit(self._testModeOrder2front, xData, yData, p0= [pos, 1, 1, 1], maxfev=50000)
@@ -795,14 +809,14 @@ class Beamline:
         return endParams
 
     def _testModeOrder2front(self, x, origin, B0, a1, a2):
-        return B0/(1+np.exp((a1*(-x - origin)) + (a2*(-x-origin)**2)))
+        return B0/(1+torch.exp((a1*(-x - origin)) + (a2*(-x-origin)**2)))
 
 
     def _endModel(self, x, origin, B0, strength):
-        return (B0/(1+np.exp((x-origin)*strength)))
+        return (B0/(1+torch.exp((x-origin)*strength)))
 
     def _frontModel(self, x, origin, B0, strength):
-        return (B0/(1+np.exp((-x+origin)*strength)))
+        return (B0/(1+torch.exp((-x+origin)*strength)))
 
     def frontFit(self, xData, yData, pos):
         endParams, _ = optimize.curve_fit(self._frontModel, xData, yData, p0= [pos, 1, 1], maxfev=50000)
@@ -856,134 +870,74 @@ class Beamline:
 
     # issue: origin of equations may not match with beamline exactly if interval 
     #        doesnt match beamline interval
-    def reconfigureLine(self, interval = None):
+    def reconfigureLine(self, interval=None):
+        """
+        Reconfigures the beamline by discretizing drift spaces into fringe field segments.
+        Uses PyTorch vectorized operations to calculate total magnetic field distribution.
+        All logic is computed in tensors to avoid expensive Python loops.
+        """
         if interval is None:
             interval = self.FRINGEDELTAZ
 
-        beamline = self.beamline
-        totalLen = self.totalLen
+        # 1. Vectorized zLine generation using torch.linspace
+        # Replacing: while i <= totalLen: zLine.append(i)
+        num_points = int(torch.ceil(self.totalLen / interval)) + 1
+        z_line = torch.linspace(0, self.totalLen, num_points, dtype=torch.float32)
+        y_values = torch.zeros_like(z_line)
 
-        # zLine = np.linspace(0,totalLen,math.ceil(totalLen/interval)+1)
-        # y_values = np.zeros_like(zLine)
+        # 2. Vectorized Field Superposition (End Model)
+        # Replaces 'zeroTracker' while-loops with Boolean Masking
+        for segment in self.beamline:
+            if segment.fringeType == 'first order decay':
+                b0 = 1.0 # Temporary constant
+                strength = 1.0
+                # Calculate the origin point for the decay model
+                origin = segment.endPos - (torch.log((1 - self.ORIGINFACTOR) / self.ORIGINFACTOR) / strength)
 
-        zLine = []
-        i = 0
-        while i <= totalLen:
-            zLine.append(i)
-            i += interval
-        if not interval == (i - totalLen):
-            zLine.append(totalLen)
-        zLine = np.array(zLine)
+                # Compute the entire field for all z points simultaneously
+                y_field = b0 / (1 + torch.exp((z_line - origin) * strength))
 
-        y_values = np.zeros_like(zLine)
+                # Apply Mask: zero out fields before the segment end (Parallelized)
+                y_field[z_line < segment.endPos] = 0
+                y_values += y_field
 
-        #  add to end of beam segments
-        for segment in reversed(beamline):
-            #  custom fringe field
-            if isinstance(segment.fringeType, list):
-                xData = segment.fringeType[0].copy()
-                yData = segment.fringeType[1].copy()
+        # 3. Vectorized Field Superposition (Front Model)
+        for segment in self.beamline:
+            if segment.fringeType == 'first order decay':
+                b0 = 1.0
+                strength = 5.0
+                origin = segment.startPos + (torch.log((1 - self.ORIGINFACTOR) / self.ORIGINFACTOR) / strength)
 
-                for i in range(len(xData)): xData[i] += segment.endPos  # adjust for z position
+                y_field = b0 / (1 + torch.exp((-z_line + origin) * strength))
 
-                params = self.endFit(xData,yData, segment.endPos)
-                yfield = self._endModel(zLine, *params)
+                # Apply Mask: zero out fields after the segment start
+                y_field[z_line > segment.startPos] = 0
+                y_values += y_field
 
-                # params = self.testendFit(xData, yData, segment.endPos)
-                # yfield = self._testModeOrder2end(zLine, *params)
+        # 4. Optimized Reconstruction (Building a new list instead of in-place insert)
+        # Python list.insert() is O(N), repeatedly inserting makes it O(N^2)
+        new_beamline = []
+        for seg in self.beamline:
+            if not isinstance(seg, driftLattice):
+                new_beamline.append(seg)
+            else:
+                # Vectorized lookup of the drift's range within the z_line
+                mask = (z_line >= seg.startPos) & (z_line <= seg.endPos)
+                z_slice = z_line[mask]
+                y_slice = y_values[mask]
 
-                zeroTracker = 0
-                while (zLine[zeroTracker] < segment.endPos and zeroTracker < zLine.size):
-                    yfield[zeroTracker] = 0
-                    zeroTracker += 1
+                # Sub-divide the drift into fringeField micro-segments
+                for j in range(1, len(z_slice)):
+                    l_slice = z_slice[j] - z_slice[j-1]
+                    # Creating segment objects
+                    new_beamline.append(self.fringeField(l_slice.item(), y_slice[j].item()))
 
-                y_values += yfield
+                # Handle floating point residual for the last segment of the drift
+                remaining_l = seg.length - (z_slice[-1] - z_slice[0])
+                if remaining_l > 1e-12:
+                    new_beamline.append(self.fringeField(remaining_l.item(), y_slice[-1].item()))
 
-            elif (segment.fringeType == 'first order decay'):
-                B0 = 1 # temporary
-                strength = 1 # temporary, must let user choose this
-                yfield = self._endModel(zLine,
-                                        segment.endPos-(np.log((1-self.ORIGINFACTOR)/self.ORIGINFACTOR)/strength),
-                                        B0, strength)
-                zeroTracker = 0
-                while (zLine[zeroTracker] < segment.endPos and zeroTracker < zLine.size):
-                    yfield[zeroTracker] = 0
-                    zeroTracker += 1
+        self.beamline = new_beamline
+        self.defineEndFrontPos() # Refresh position metadata
 
-                y_values += yfield
-
-
-        #  add to the front of beam segments
-        for segment in beamline:
-            #  custom fringe field
-            if isinstance(segment.fringeType, list):
-                xData = segment.fringeType[0].copy()
-                yData = segment.fringeType[1].copy()
-                for i in range(len(xData)): xData[i] *= -1
-
-                for i in range(len(xData)): xData[i] += segment.startPos
-                params = self.frontFit(xData,yData, segment.startPos)
-                yfield = self._frontModel(zLine, *params)
-
-                # params = self.testFrontFit(xData, yData, segment.startPos)
-                # yfield = self._testModeOrder2front(zLine, *params)
-
-                zeroTracker = len(zLine)-1
-                while (zLine[zeroTracker] > segment.startPos and zeroTracker >= 0):
-                    yfield[zeroTracker] = 0
-                    zeroTracker -= 1
-
-                y_values += yfield
-
-            elif (segment.fringeType == 'first order decay'):
-                B0 = 1 # temporary?
-                strength = 5 # temporary, must let user choose this
-                yfield = self._frontModel(zLine,
-                                        segment.startPos+(np.log((1-self.ORIGINFACTOR)/self.ORIGINFACTOR)/strength),
-                                        B0, strength)
-
-                zeroTracker = len(zLine)-1
-                while (zLine[zeroTracker] > segment.startPos and zeroTracker >= 0):
-                    yfield[zeroTracker] = 0
-                    zeroTracker -= 1
-
-                y_values += yfield
-
-        #  Create each fringe field element, using right Riemann summnation
-        i = 0
-        while (i < len(beamline)):
-            if isinstance(beamline[i], driftLattice):
-                #  Find in x the value that first comes after start.pos
-                index = np.searchsorted(zLine, beamline[i].startPos, side='right')
-
-                totalDriftLen = beamline[i].length
-                totalFringeLen = 0
-
-                fringeLen = zLine[index] - beamline[i].startPos
-                totalDriftLen -= fringeLen
-
-                #  Convert drift segment into fringe field segments
-                while (totalDriftLen >= 0 and index < len(y_values) - 1):
-                    totalFringeLen += fringeLen
-                    fringe = self.fringeField(fringeLen, y_values[index])
-                    beamline.insert(i, fringe)
-
-                    i += 1 # for adding a fringe field
-                    index += 1 # Get next y values
-                    fringeLen = zLine[index] - zLine[index-1]
-                    totalDriftLen -= fringeLen
-
-                beamline[i].length -= totalFringeLen
-
-                #  Convert last portion of drift portion to fringe field and remove
-                if (beamline[i].length > 0 and index < len(y_values)):
-                    fringe = self.fringeField(beamline[i].length, y_values[index])
-                    beamline.insert(i, fringe)
-                    i += 1
-                    #WIP adding to final leftover interval
-
-                beamline.pop(i)
-            i += 1
-
-        self.defineEndFrontPos()
-        return zLine, y_values
+        return z_line.numpy(), y_values.numpy()
