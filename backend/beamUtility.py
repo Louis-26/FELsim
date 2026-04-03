@@ -2,6 +2,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
 from scipy.stats import norm
+import torch
 
 class beamUtility:
     e = 1.602176634e-19  # Elementary charge (C) [CODATA 2018]
@@ -39,36 +40,49 @@ class beamUtility:
         self.sigma_y = sigma_y # sigma_y : 10 mm
 
     #f_bunch: Bunch frequency (Hz)
-    def chargePerMacropulse(self, I_pulse_range: list, T_pulse_values: list, f_bunch = 2.856e9):
+    def chargePerMacropulse(self, I_pulse_range: list, T_pulse_values: list, f_bunch=2.856e9):
+        """
+        Computes and plots the charge per macropulse using PyTorch vectorization.
+        Eliminates internal loops over current range for performance.
+        """
         line_styles = ['-', '--', '-.']
 
-        # Plotting beam properties
+        # 1. Input conversion to Tensors
+        # Shape: (N_currents,)
+        I_tensor = torch.tensor(I_pulse_range, dtype=torch.float32)
+        # Shape: (N_pulses,)
+        T_tensor = torch.tensor(T_pulse_values, dtype=torch.float32)
+
         fig, ax1 = plt.subplots(figsize=(10, 5))
 
-        for idx, T_pulse in enumerate(T_pulse_values):
-            Q_macropulse = np.zeros(len(I_pulse_range))
-            Q_bunch = np.zeros(len(I_pulse_range))
+        # 2. Iterate through pulse durations (for separate plot lines)
+        for idx, T_pulse in enumerate(T_tensor):
+            # 3. Vectorized calculation: Q = I * T * 1e12 (pC)
+            # This one-liner replaces the inner 'for i, I_pulse in enumerate(...)' loop
+            Q_macropulse = (I_tensor * T_pulse) * 1e12
 
-            # Compute charge per macropulse (pC/macropulse) and charge per bunch (pC/bunch)
-            bunches_per_macropulse = f_bunch * T_pulse
-            for i, I_pulse in enumerate(I_pulse_range):
-                Q_macropulse[i] = (I_pulse * T_pulse) * 1e12  # Charge per macropulse (pC)
-                nb_bunch_per_pulse = f_bunch * T_pulse
-                Q_bunch[i] = (I_pulse / f_bunch) * 1e12  # Charge per bunch (pC)
+            # 4. Optional: Compute bunch charge (Vectorized)
+            # Q_bunch = (I_pulse / f_bunch) * 1e12
 
-            # Plot charge per bunch
-            # ax1.plot(I_pulse_range * 1e3, Q_bunch, linestyle=line_styles[idx], color='k', label=f'Charge per Bunch ({T_pulse * 1e6} us)')
+            # 5. Data conversion for Matplotlib (Tensor -> NumPy)
+            current_mA = I_tensor.numpy() * 1e3
+            pulse_us = T_pulse.item() * 1e6
 
-            # Plot charge per macropulse
-            ax1.plot(I_pulse_range * 1e3, Q_macropulse, alpha=1.0, linestyle=line_styles[idx], color='k', label=f'Charge per Macropulse ({T_pulse * 1e6} us)')
+            # Plotting the result for current pulse duration
+            ax1.plot(current_mA, Q_macropulse.numpy(),
+                     linestyle=line_styles[idx % len(line_styles)],
+                     color='k',
+                     label=f'Pulse Duration: {pulse_us:.1f} $\mu$s')
 
+        # 6. Plot Styling and Labeling
         ax1.set_xlabel("Macropulse Current (mA)")
         ax1.set_ylabel("Charge per Macropulse (pC)", color='k')
         ax1.tick_params(axis='y', labelcolor='k')
-        ax1.grid()
+        ax1.grid(True, which='both', linestyle=':', alpha=0.6)
         ax1.legend(loc='upper left')
 
         fig.suptitle("Charge per Macropulse vs Beam Current for Different Pulse Durations")
+        plt.tight_layout()
         plt.show()
 
     # penetration_depch : 1 mm
@@ -139,54 +153,197 @@ class beamUtility:
         return df_power
     
         # Function to compute penetration depth using Grunn model
+    # ❌no need to change
     def model_Grunn(self, material, E_energy_range):
         rho = self.materials[material]["density"]/1000  # Density in g/cm³
         results = [[material, E, (0.1 * E**1.5) / rho] for E in E_energy_range]
         return pd.DataFrame(results, columns=["Material", "Energy (MeV)", "Penetration Depth (cm)"])
 
     # Function to compute penetration depth and stopping power using Bethe model
-    def model_Bethe(self, material, E_energy_range):
-        props = self.materials[material]
-        rho = props["density"]/1000  # Density in g/cm³
-        Z = props["atomic_number"]
-        A = props["atomic_mass"]  # Atomic mass in g/mol
-        I = props["ionization_potential"] * self.e  # Convert eV to Joules
-        n_e = (self.NA * rho / A) * Z * 1e6  # Convert electrons/cm³ to electrons/m³
+    def getPowerDF(self, I_pulse_range, T_pulse_values, rep_rate_values,
+                   E_energy_range, plot_type="Power", penetration_depth=20e-3, plot=True):
+        """
+        Computes power deposition and temperature rise using 4D Tensor broadcasting.
+        Eliminates all nested loops for physics calculations.
+        """
+        # 1. Coordinate conversion to Tensors
+        I_t = torch.tensor(I_pulse_range, dtype=torch.float32)      # Current [A]
+        T_t = torch.tensor(T_pulse_values, dtype=torch.float32)    # Duration [us]
+        R_t = torch.tensor(rep_rate_values, dtype=torch.float32)   # Rep Rate [Hz]
+        E_t = torch.tensor(E_energy_range, dtype=torch.float32)    # Energy [MeV]
 
-        results = []
+        # 2. Geometric calculations
+        # Elliptical cross-section (6-sigma)
+        beam_area = torch.pi * (6 * self.sigma_x) * (6 * self.sigma_y)
+        beam_volume_cm3 = (beam_area * penetration_depth) * 1e6
 
-        for E in E_energy_range:
-            E_J = E * self.MeV_to_J  # Convert energy to Joules
-            gamma = 1 + (E_J / (self.me * self.c**2))
-            beta = np.sqrt(1 - (1 / gamma**2))
+        # 3. 4D Broadcasting magic: [Energy, RepRate, PulseDuration, Current]
+        # We reshape tensors to different dimensions to trigger automatic expansion
+        # E_t: (E, 1, 1, 1), R_t: (1, R, 1, 1), T_t: (1, 1, T, 1), I_t: (1, 1, 1, I)
+        E_4d = E_t.view(-1, 1, 1, 1)
+        R_4d = R_t.view(1, -1, 1, 1)
+        T_4d = T_t.view(1, 1, -1, 1)
+        I_4d = I_t.view(1, 1, 1, -1)
 
-            log_term = (2 * self.me * self.c**2 * beta**2) / I
-            log_term = max(log_term, 1e-6)  # Avoid log errors
+        # Calculate Charge and Power in one shot across the entire 4D grid
+        # Q = I * (T * 1e-6)
+        Q_macropulse = I_4d * (T_4d * 1e-6)
+        # N = Q / e
+        N_electrons = Q_macropulse / self.e
+        # E_pulse = N * (E * MeV_to_J)
+        E_pulse = N_electrons * (E_4d * self.MeV_to_J)
+        # P_beam = E_pulse * R
+        P_beam = E_pulse * R_4d  # Shape: (E, R, T, I)
 
-            stopping_power = (4 * np.pi * self.e**3 * Z * n_e) / (self.me * self.c**2 * beta**2) * np.log(log_term) / 100  # MeV/cm
+        # 4. Material-specific Temperature Rise
+        temp_results = {}
+        for mat, props in self.materials.items():
+            # Mass in grams
+            mass = beam_volume_cm3 * props["density"] / 1000.0
+            # Temp rise [°C/s] = Power / (mass * heat_capacity)
+            temp_results[mat] = P_beam / (mass * props["heat_capacity"])
 
-            R = E_J / (stopping_power) if stopping_power > 0 else 0  # Penetration depth in cm
+        # 5. Flatten the 4D grid to a DataFrame format
+        # Meshgrid-like expansion for all parameters to align with P_beam
+        E_grid, R_grid, T_grid, I_grid = torch.meshgrid(E_t, R_t, T_t, I_t, indexing='ij')
 
-            stopping_power = stopping_power / self.MeV_to_J / 10
+        df_data = {
+            "Energy (MeV)": E_grid.reshape(-1).numpy(),
+            "Beam Current (mA)": (I_grid.reshape(-1) * 1e3).numpy(),
+            "Repetition Rate (Hz)": R_grid.reshape(-1).numpy(),
+            "Pulse Duration (us)": T_grid.reshape(-1).numpy(),
+            "Power (W)": P_beam.reshape(-1).numpy(),
+            "Temp Rise Copper (C/s)": temp_results["Copper"].reshape(-1).numpy(),
+            "Temp Rise Aluminum (C/s)": temp_results["Aluminum"].reshape(-1).numpy(),
+            "Temp Rise Stainless Steel (C/s)": temp_results["Stainless Steel"].reshape(-1).numpy()
+        }
+        df_power = pd.DataFrame(df_data)
 
-            results.append([material, E, max(R, 0), stopping_power])
+        # 6. Plotting logic (Kept largely the same but optimized data access)
+        if plot:
+            self._plot_power_grid(df_power, rep_rate_values, T_pulse_values, I_pulse_range, plot_type)
 
-        return pd.DataFrame(results, columns=["Material", "Energy (MeV)", "Penetration Depth (cm)", "Stopping Power (MeV/mm)"])
+        return df_power
+
+    def _plot_power_grid(self, df_power, rep_rate_values, T_pulse_values, I_pulse_range, plot_type):
+        """
+        Internal helper to render the multi-panel grid of beam power or temperature rise.
+        Uses English comments for professional documentation.
+        """
+        import matplotlib.pyplot as plt
+
+        # 1. Configuration for visualization
+        # Note: 'material' should be passed or stored; defaulting to 'Copper' for the label
+        target_material = "Copper"
+        colors = ['lightskyblue', 'goldenrod', 'black', 'lightcoral']
+        linestyles = ['-', '-', '--', '-']
+
+        h_size = len(rep_rate_values)
+        v_size = len(T_pulse_values)
+
+        # Create a grid of subplots (RepRate rows, PulseDuration columns)
+        fig, axes = plt.subplots(h_size, v_size, figsize=(14, 10), sharex=True)
+
+        # Ensure axes is always a 2D array even for 1x1 grids
+        if h_size == 1 and v_size == 1: axes = np.array([[axes]])
+        elif h_size == 1: axes = axes[np.newaxis, :]
+        elif v_size == 1: axes = axes[:, np.newaxis]
+
+        # 2. Iterate through the grid backwards to match your original 'reversed' logic
+        for i, r in enumerate(rep_rate_values[::-1]):
+            row_max_y = 0  # To synchronize Y-axis scale within each row
+
+            for j, T_pulse in enumerate(T_pulse_values[::-1]):
+                ax = axes[i, j]
+
+                # Filter data using fast Pandas boolean indexing
+                mask = (df_power["Repetition Rate (Hz)"] == r) & \
+                       (df_power["Pulse Duration (us)"] == T_pulse)
+                subset = df_power[mask]
+
+                if not subset.empty:
+                    # Plot a separate line for each Current (mA)
+                    for k, I_val in enumerate(I_pulse_range):
+                        # Filter by current (converted to mA for matching)
+                        current_data = subset[subset["Beam Current (mA)"] == I_val * 1e3]
+
+                        if not current_data.empty:
+                            # Choose Y-axis variable based on plot_type
+                            y_col = "Power (W)" if plot_type == "Power" else f"Temp Rise {target_material} (C/s)"
+                            y_values = current_data[y_col].values
+                            x_values = current_data["Energy (MeV)"].values
+
+                            ax.plot(x_values, y_values,
+                                    linestyle=linestyles[k % len(linestyles)],
+                                    color=colors[k % len(colors)],
+                                    label=f"{I_val*1e3:.1f} mA")
+
+                            # Track max Y for scaling
+                            row_max_y = max(row_max_y, y_values.max())
+
+                # Subplot Aesthetics
+                ax.set_title(f"{r} Hz, {T_pulse} $\mu$s", fontsize=9)
+                ax.grid(True, linestyle=':', alpha=0.6)
+                ax.tick_params(labelsize=8)
+
+            # 3. Apply independent Y-scaling for the row to improve readability of trends
+            for ax_in_row in axes[i, :]:
+                ax_in_row.set_ylim(0, row_max_y * 1.15)
+
+        # 4. Global Figure Labeling
+        ylabel = "Power (W)" if plot_type == "Power" else f"Temp Rise {target_material} (°C/s)"
+        fig.text(0.5, 0.02, "Beam Energy (MeV)", ha='center', fontsize=12)
+        fig.text(0.02, 0.5, ylabel, va='center', rotation='vertical', fontsize=12)
+        fig.suptitle(f"Multi-Parameter Beam {plot_type} Analysis", fontsize=14, y=0.98)
+
+        # Legend: Only one global legend to avoid cluttering subplots
+        handles, labels = axes[0, 0].get_legend_handles_labels()
+        if handles:
+            fig.legend(handles, labels, loc='upper right', ncol=len(I_pulse_range),
+                       fontsize=9, bbox_to_anchor=(0.95, 0.95))
+
+        plt.tight_layout(rect=[0.05, 0.05, 0.95, 0.93]) # Leave room for suptitle and labels
+        plt.show()
 
     # Function to compute electron deposition profile
     def compute_deposition_profile(self, energy, material):
-        df_bethe = self.model_Bethe(material)
+        """
+        Computes electron deposition profile using PyTorch distributions.
+        Replaces scipy.stats.norm for better integration with the vectorized pipeline.
+        """
+        # 1. Generate energy range and fetch the stopping power data
+        # We use torch.linspace directly to keep it in the tensor family
+        e_range = torch.linspace(0.1, energy + 10, 200, dtype=torch.float64)
+        df_bethe = self.model_Bethe(material, e_range)
+
+        # 2. Find the penetration depth R for the specific energy
+        # We use pandas logic here since model_Bethe returns a DataFrame
         closest_energy_idx = (df_bethe["Energy (MeV)"].sub(energy)).abs().idxmin()
-        R = df_bethe.loc[closest_energy_idx, "Penetration Depth (cm)"]
+        R = torch.tensor(df_bethe.loc[closest_energy_idx, "Penetration Depth (cm)"], dtype=torch.float64)
 
-        x_range = np.linspace(0, R + 2, 100)
-        sigma = R * 0.2  # Assuming a spread of 20% around the penetration depth
-        deposition_profile = norm.pdf(x_range, R, sigma)
-        deposition_profile /= np.max(deposition_profile)  # Normalize
+        # 3. Create depth range (x_range) as a Tensor
+        # Extending 2cm beyond the max range R
+        x_range = torch.linspace(0, R.item() + 2, 100, dtype=torch.float64)
 
+        # 4. Compute Gaussian deposition profile
+        # Sigma represents the longitudinal straggling (20% of R)
+        sigma = R * 0.2
+
+        # Use PyTorch's math operations to implement the Normal PDF:
+        # f(x) = exp(-0.5 * ((x - R)/sigma)^2)
+        # We don't need the normalization constant 1/(sigma*sqrt(2pi))
+        # because we normalize to max=1 later anyway.
+        z_score = (x_range - R) / sigma
+        deposition_profile = torch.exp(-0.5 * z_score**2)
+
+        # 5. Normalize to peak intensity
+        deposition_profile = deposition_profile / torch.max(deposition_profile)
+
+        # Return as Tensors (you can .numpy() them in the plot function)
         return x_range, deposition_profile
     
     # Function to plot electron deposition profile
+    # ❌no need to change
     def plot_deposition_profile(self, energy, material):
         x_range, deposition_profile = self.compute_deposition_profile(energy, material)
         plt.figure(figsize=(8, 5))
@@ -199,6 +356,7 @@ class beamUtility:
         plt.show()
 
     # Function to plot penetration depth
+    # ❌no need to change
     def plot_penetration_depth(self, material, df_grunn = None, df_bethe = None, E_energy_range = np.logspace(-1, 2, 100)):
         df_grunn = self.model_Grunn(material,E_energy_range) if df_grunn is None else df_grunn
         df_bethe = self.model_Bethe(material, E_energy_range) if df_bethe is None else df_bethe
@@ -214,6 +372,7 @@ class beamUtility:
         plt.show()
 
     # Function to plot stopping power
+    # ❌no need to change
     def plot_stopping_power(df, material):
         plt.figure(figsize=(8, 5))
         plt.xscale("log")
@@ -228,7 +387,7 @@ class beamUtility:
 
 if __name__ == "__main__":    
     obj = beamUtility()
-    obj.chargePerMacropulse(np.linspace(0, 200e-3, 50), [2.0e-6, 5.0e-6, 8.0e-6])
+    obj.chargePerMacropulse(torch.linspace(0, 200e-3, 50), [2.0e-6, 5.0e-6, 8.0e-6])
     obj.getPowerDF(np.array([50e-3, 100e-3, 170e-3, 200e-3]), np.array([4.0, 6.0]),
                        rep_rate_values = np.array([1, 2]), E_energy_range = np.linspace(0, 50, 100),
                        plot_type = "Temperature")

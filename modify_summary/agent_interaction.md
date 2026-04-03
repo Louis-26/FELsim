@@ -12,7 +12,7 @@ output: summarized [here](../project_basics/project_overview.md)
 
 2. intention: have a clear division of different code files
 question: above all, can you help categorize all code files in backend folder based on their specific functionality?
-output: summarized [here](../modify_summary/file_categorization.md)
+output: summarized [here](file_category.md)
 
 3. intention: look at each file in detail
 question: go through all files here in backend folder, and summarize the outline of each python script

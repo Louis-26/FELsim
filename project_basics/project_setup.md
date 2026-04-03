@@ -9,6 +9,7 @@ docker compose up --build
 
 # run locally
 ## step 1: configure environment
+install pytorch here to integrate original code into pytorch framework
 ```bash
 cd $(git rev-parse --show-toplevel)/backend/
 if ! conda info --envs | grep -q "^felsim "; then
@@ -17,6 +18,8 @@ if ! conda info --envs | grep -q "^felsim "; then
     # pip install "huggingface-hub<1.0,>=0.34.0"
     # pip install filelock pyyaml regex requests safetensors tokenizers
     pip install -r requirements.txt
+    pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cu128
+
 else 
     conda activate felsim
 fi

@@ -5,6 +5,7 @@ import numpy as np
 from scipy import interpolate
 from scipy import optimize
 import math
+import torch
 
 #IMPORTANT NOTES:
     #  by default every beam type is an electron beam type
@@ -15,7 +16,7 @@ import math
 
 #      getSymbolicMatrice() must use all sympy methods and functions, NOT numpy
 
-        
+
 class lattice:
     E = 45  # Kinetic energy (MeV/c^2)
     ## this should be passed from ebeam
@@ -59,7 +60,7 @@ class lattice:
             self.length = length
         else:
             raise ValueError("Invalid Parameter: Please enter a positive length parameter")
-        
+
     def setE(self, E):
         '''
         Sets the kinetic energy (E) of the particle and updates dependent relativistic factors.
@@ -108,7 +109,7 @@ class lattice:
             The kinetic energy for the new particle type in MeV/c^2.
         beamSegments : list[lattice], optional
             A list of other beamline segment objects whose particle properties
-            should also be updated. 
+            should also be updated.
 
         Returns
         -------
@@ -150,7 +151,7 @@ class lattice:
                     return beamSegments
             except:
                 raise TypeError("Invalid particle beam type or isotope")
-    
+
     def getSymbolicMatrice(self, **kwargs):
         '''
         Abstract method to be implemented by child classes. This method should
@@ -167,7 +168,7 @@ class lattice:
             If the method is not implemented in the child class.
         '''
         raise NotImplementedError("getSymbolicMatrice not defined in child class")
-    
+
     #unfortuately, cannot check whether the kwargs exist in the segments function or not already
     def useMatrice(self, val, **kwargs):
         ''''
@@ -176,7 +177,7 @@ class lattice:
 
         Parameters
         ----------
-        val : np.ndarray
+        val tensor V: torch tensor, with the shape N*6, N is the number of particles, 6 is the phase space coordinates (x, x', y, y', z, z')
             A 2D NumPy array representing the particle states. Each row is a particle,
             and columns correspond to phase space coordinates (e.g., [x, x', y, y', z, z']).
         **kwargs : dict
@@ -186,19 +187,22 @@ class lattice:
         Returns
         -------
         list
-            A 2D list where each inner list represents the transformed state of a particle
+            A 2D list with length N, where each inner list with size 6 represents the transformed state of a particle
             after passing through the segment.
 
         '''
+        # transformation matrix M with the size 6*6, where the new particle P'=MP
         mat = self.getSymbolicMatrice(numeric = True, **kwargs)
-        npMat = np.array(mat).astype(np.float64)
+        # transform into torch tensor
+        mat_tensor = torch.tensor(np.array(mat).astype(np.float64),
+                                  dtype=val.dtype,
+                                  device=val.device)
 
-        newMatrix = []
-        for array in val:
-            tempArray = np.matmul(npMat, array)
-            newMatrix.append(tempArray.tolist())
-        return newMatrix #  return 2d list
-    
+        # parallelized matrix multiplication
+        new_val_tensor = torch.matmul(val, mat_tensor.T)
+        new_val_tensor = new_val_tensor.cpu().numpy().tolist()
+        return new_val_tensor
+
 class driftLattice(lattice):
     color = "white"
     def __init__(self, length: float):
@@ -211,7 +215,7 @@ class driftLattice(lattice):
             The length of the drift segment in meters.
         '''
         super().__init__(length)
-    
+
     # note: unlike old usematrice, this func doesnt check for negative/zero parameter numbers,
     # Nor if length is actually the dtype numeric specifies
     # implement both useMatrice and symbolic matrice in this, have to delete both later
@@ -238,7 +242,7 @@ class driftLattice(lattice):
         else:
             if numeric: l = length  # length should be number
             else: l = symbols(length, real = True)  # length should be string
-        
+
         M56 = -(l * self.f / (self.C * self.beta * self.gamma * (self.gamma + 1)))
         mat = Matrix([[1, l, 0, 0, 0, 0],
                       [0, 1, 0, 0, 0, 0],
@@ -246,8 +250,7 @@ class driftLattice(lattice):
                       [0, 0, 0, 1, 0, 0],
                       [0, 0, 0, 0, 1, M56],
                       [0, 0, 0, 0, 0, 1]])
-        
-        return mat
+        return torch.tensor(mat,dtype=torch.float32)
 
     def __str__(self):
         '''
@@ -276,8 +279,8 @@ class qpfLattice(lattice):
             The current supplied to the quadrupole in Amps.
         length : float, optional
             The effective length of the quadrupole magnet in meters.
-        fringeType : 
-            
+        fringeType :
+
         '''
         super().__init__(length, fringeType)
         self.current = current #  Amps
@@ -341,9 +344,9 @@ class qpfLattice(lattice):
                         [0, 0, M43, M44, 0, 0],
                         [0, 0, 0, 0, 1, M56],
                         [0, 0, 0, 0, 0, 1]])
-        
-        return mat
-    
+
+        return torch.tensor(mat,dtype=torch.float32)
+
     def __str__(self):
         '''
         Returns a string representation of the quadrupole focusing lattice segment.
@@ -362,7 +365,7 @@ class qpdLattice(lattice):
     G = 2.694  # Quadruple focusing strength (T/A/m)
     def __init__(self, current: float, length: float = 0.0889, fringeType = 'decay'):
         '''
-        Represents a quadrupole defocusing magnet. This magnet defocuses in the x plane 
+        Represents a quadrupole defocusing magnet. This magnet defocuses in the x plane
         and focuses in the y plane
 
         Parameters
@@ -371,11 +374,11 @@ class qpdLattice(lattice):
             The current supplied to the quadrupole in Amps.
         length : float, optional
             The effective length of the quadrupole magnet in meters.
-        fringeType : 
+        fringeType :
         '''
         super().__init__(length, fringeType)
         self.current = current # Amps
-    
+
     def getSymbolicMatrice(self, numeric = False, length = None, current = None):
         '''
         Returns the 6x6 transfer matrix for a quadrupole defocusing magnet.
@@ -435,8 +438,8 @@ class qpdLattice(lattice):
                         [0, 0, M43, M44, 0, 0],
                         [0, 0, 0, 0, 1, M56],
                         [0, 0, 0, 0, 0, 1]])
-        
-        return mat
+
+        return torch.tensor(mat,dtype=torch.float32)
 
     def __str__(self):
         '''
@@ -461,12 +464,12 @@ class dipole(lattice):
         length : float, optional
             The effective length of the dipole magnet in meters
         angle : float, optional
-            The bending angle of the dipole magnet in degrees. 
-        fringeType : 
+            The bending angle of the dipole magnet in degrees.
+        fringeType :
         '''
         super().__init__(length, fringeType)
         self.angle = angle  # degrees
-    
+
     def getSymbolicMatrice(self, numeric = False, length = None, angle = None):
         '''
         Returns the 6x6 transfer matrix for a horizontal dipole bending magnet.
@@ -481,7 +484,7 @@ class dipole(lattice):
             If None, uses segment's length.
         angle : float or str, optional
             If `numeric` is True, this is the numerical bending angle in degrees,
-            if False, string symbolic angle. 
+            if False, string symbolic angle.
             If None, uses segment's angle.
 
         Returns
@@ -522,8 +525,8 @@ class dipole(lattice):
                       [0, 0, 0, 1, 0, 0],
                       [M51, M52, 0, 0, 1, M56],
                       [0, 0, 0, 0, 0, 1]])
-      
-        return mat
+
+        return torch.tensor(mat,dtype=torch.float32)
 
     def __str__(self):
         '''
@@ -562,7 +565,7 @@ class dipole_wedge(lattice):
             The gap between the dipole poles in meters. Used in the fringe field calculation.
         enge_fct : float, optional
             Placeholder for Enge function parameter, related to fringe field modeling.
-        fringeType : 
+        fringeType :
         '''
         super().__init__(length, fringeType)
         self.angle = angle
@@ -649,8 +652,8 @@ class dipole_wedge(lattice):
                       [0, 0, -Ty / R, 1, 0, 0],
                       [0, 0, 0, 0, 1, M56],
                       [0, 0, 0, 0, 0, 1]])
-        
-        return mat
+
+        return torch.tensor(mat,dtype=torch.float32)
 
     def __str__(self):
         '''
@@ -662,7 +665,7 @@ class dipole_wedge(lattice):
             A descriptive string
         '''
         return f"Horizontal wedge dipole magnet segment {self.length} m long (curvature) with an angle of {self.angle} degrees"
-    
+
 
 
 #NOTE: getSymbolicMatrice() must use all sympy methods and functions, NOT numpy
@@ -685,14 +688,14 @@ class Beamline:
             else:
                 if numeric: l = length  # length should be number
                 else: l = symbols(length, real = True)  # length should be string
-            
+
             # if current is None:
             #     I = self.current
             # else:
             #     if numeric: I = current  # current should be number
             #     else: I = symbols(current, real = True)  # current should be string
-            
-            # self.k = sp.Abs((self.Q*self.G*I * self.fringeDecay )/(self.M*self.C*self.beta*self.gamma))  
+
+            # self.k = sp.Abs((self.Q*self.G*I * self.fringeDecay )/(self.M*self.C*self.beta*self.gamma))
             # self.theta = sp.sqrt(self.k)*l
 
             # M11 = sp.cos(self.theta)
@@ -716,9 +719,9 @@ class Beamline:
             #                 [0, 0, M43, M44, 0, 0],
             #                 [0, 0, 0, 0, 1, M56],
             #                 [0, 0, 0, 0, 0, 1]])
-            
+
             # return mat
-        
+
             M56 = (l * self.f / (self.C * self.beta * self.gamma * (self.gamma + 1)))
             mat = Matrix([[1, l, 0, 0, 0, 0],
                         [0, 1, 0, 0, 0, 0],
@@ -726,22 +729,22 @@ class Beamline:
                         [0, 0, 0, 1, 0, 0],
                         [0, 0, 0, 0, 1, M56],
                         [0, 0, 0, 0, 0, 1]])
-            
-            return mat
+
+            return torch.tensor(mat,dtype=torch.float32)
 
 
         def __str__(self) -> str:
             return f"Fringe field segment {self.length} m long with a magnetic field of {self.B} teslas"
-    
+
     def csvToBeamline(self, csv):
         with open(csv, newline='') as file:
             reader = csv.reader(file)
-            
+
 
     def __init__(self, line = []):
         self.ORIGINFACTOR = 0.99
-        
-        a = {'first order decay': (self._frontModel, self._endModel)} # must work on later 
+
+        a = {'first order decay': (self._frontModel, self._endModel)} # must work on later
         self.FRINGEDELTAZ = 0.01
 
         self.beamline = line
@@ -763,8 +766,8 @@ class Beamline:
                 return i
         return -1
 
-     #  may use other interpolation methods (cubic, spline, etc)  
-     # x = 0 = start of end of segment     
+     #  may use other interpolation methods (cubic, spline, etc)
+     # x = 0 = start of end of segment
     def interpolateData(self, xData, yData, interval):
         rbf = interpolate.Rbf(xData, yData)
         totalLen = xData[-1] - xData[0]
@@ -774,41 +777,41 @@ class Beamline:
 
     # def _model(self, x, B0, a, origin):
     #     return B0 * (1 - ((x-origin)/a)**2) * (np.exp(-(((x-origin)/a)**2)))
-    
+
     # def formulaFit(self, xData, yData, pos):
     #     endParams, _ = optimize.curve_fit(self._model, xData, yData, p0= [1,1, pos])
     #     return endParams
-    
+
     def _testModeOrder2end(self, x, origin, B0, a1, a2):
         return B0/(1+np.exp((a1*(x - origin)) + (a2*(x-origin)**2)))
-    
+
     def testFrontFit(self, xData, yData, pos):
         endParams, _ = optimize.curve_fit(self._testModeOrder2front, xData, yData, p0= [pos, 1, 1, 1], maxfev=50000)
         return endParams
-    
+
     def testendFit(self, xData, yData, pos):
         endParams, _ = optimize.curve_fit(self._testModeOrder2end, xData, yData, p0= [pos, 1, 1, 1], maxfev=50000)
         print(endParams)
         return endParams
-    
+
     def _testModeOrder2front(self, x, origin, B0, a1, a2):
         return B0/(1+np.exp((a1*(-x - origin)) + (a2*(-x-origin)**2)))
 
-    
+
     def _endModel(self, x, origin, B0, strength):
         return (B0/(1+np.exp((x-origin)*strength)))
-    
+
     def _frontModel(self, x, origin, B0, strength):
         return (B0/(1+np.exp((-x+origin)*strength)))
-    
+
     def frontFit(self, xData, yData, pos):
         endParams, _ = optimize.curve_fit(self._frontModel, xData, yData, p0= [pos, 1, 1], maxfev=50000)
         return endParams
-    
+
     def endFit(self, xData, yData, pos):
         endParams, _ = optimize.curve_fit(self._endModel, xData, yData, p0= [pos, 1, 1], maxfev=50000)
         return endParams
-    
+
     '''
     ind: int
         The indice of the magnetic segment to create fringe
@@ -821,7 +824,7 @@ class Beamline:
         while (ind2 != 0 and isinstance(beamline[ind2 - 1], driftLattice)):
             driftLen = driftLen + beamline[ind2 - 1].length
             ind2 -= 1
-        
+
         #  Create and add fringe fields to list based on input z and B values
         i = 1
         fringeTotalLen = 0
@@ -833,7 +836,7 @@ class Beamline:
                 fringeSeg = self.fringeField(fringeLen, magnetList[i-1])
                 beamline.insert(ind, fringeSeg)
             i += 1
-        
+
         #  Shorten/eliminate any drift segments overlapping with fringe fields already
         while (fringeTotalLen > 0 and isinstance(beamline[ind-1], driftLattice)):
             if (beamline[ind-1].length <= fringeTotalLen):
@@ -843,7 +846,7 @@ class Beamline:
             else:
                 beamline[ind-1].length -= fringeTotalLen
                 fringeTotalLen -= fringeTotalLen
-    
+
     # BEAMLINE OBJECT DOESNT CONTAIN THE BEAMLINE, ONLY TO PERFORM CALCULATIONS ON THE LINE
 
     # TEST: functiom ran on the class' beamline OBJECT, NOT beamline LIST
@@ -873,7 +876,7 @@ class Beamline:
         zLine = np.array(zLine)
 
         y_values = np.zeros_like(zLine)
-        
+
         #  add to end of beam segments
         for segment in reversed(beamline):
             #  custom fringe field
@@ -882,7 +885,7 @@ class Beamline:
                 yData = segment.fringeType[1].copy()
 
                 for i in range(len(xData)): xData[i] += segment.endPos  # adjust for z position
-               
+
                 params = self.endFit(xData,yData, segment.endPos)
                 yfield = self._endModel(zLine, *params)
 
@@ -900,7 +903,7 @@ class Beamline:
                 B0 = 1 # temporary
                 strength = 1 # temporary, must let user choose this
                 yfield = self._endModel(zLine,
-                                        segment.endPos-(np.log((1-self.ORIGINFACTOR)/self.ORIGINFACTOR)/strength), 
+                                        segment.endPos-(np.log((1-self.ORIGINFACTOR)/self.ORIGINFACTOR)/strength),
                                         B0, strength)
                 zeroTracker = 0
                 while (zLine[zeroTracker] < segment.endPos and zeroTracker < zLine.size):
@@ -924,19 +927,19 @@ class Beamline:
 
                 # params = self.testFrontFit(xData, yData, segment.startPos)
                 # yfield = self._testModeOrder2front(zLine, *params)
-                
+
                 zeroTracker = len(zLine)-1
                 while (zLine[zeroTracker] > segment.startPos and zeroTracker >= 0):
                     yfield[zeroTracker] = 0
                     zeroTracker -= 1
 
                 y_values += yfield
-            
+
             elif (segment.fringeType == 'first order decay'):
                 B0 = 1 # temporary?
                 strength = 5 # temporary, must let user choose this
                 yfield = self._frontModel(zLine,
-                                        segment.startPos+(np.log((1-self.ORIGINFACTOR)/self.ORIGINFACTOR)/strength), 
+                                        segment.startPos+(np.log((1-self.ORIGINFACTOR)/self.ORIGINFACTOR)/strength),
                                         B0, strength)
 
                 zeroTracker = len(zLine)-1
@@ -952,7 +955,7 @@ class Beamline:
             if isinstance(beamline[i], driftLattice):
                 #  Find in x the value that first comes after start.pos
                 index = np.searchsorted(zLine, beamline[i].startPos, side='right')
-                
+
                 totalDriftLen = beamline[i].length
                 totalFringeLen = 0
 
@@ -967,11 +970,11 @@ class Beamline:
 
                     i += 1 # for adding a fringe field
                     index += 1 # Get next y values
-                    fringeLen = zLine[index] - zLine[index-1] 
+                    fringeLen = zLine[index] - zLine[index-1]
                     totalDriftLen -= fringeLen
-                
+
                 beamline[i].length -= totalFringeLen
-                
+
                 #  Convert last portion of drift portion to fringe field and remove
                 if (beamline[i].length > 0 and index < len(y_values)):
                     fringe = self.fringeField(beamline[i].length, y_values[index])
@@ -981,6 +984,6 @@ class Beamline:
 
                 beamline.pop(i)
             i += 1
-        
+
         self.defineEndFrontPos()
         return zLine, y_values

@@ -26,10 +26,3 @@ backend
 ├── runServer.sh
 └── schematic.py
 ```
-
-# Detailed description of each file
-
-## beamline_optimization.ipynb
-a notebook for beamline optimization test
-
-## goldTwiss.py

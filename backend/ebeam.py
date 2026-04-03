@@ -8,11 +8,13 @@ from scipy.stats import gaussian_kde
 from matplotlib.colors import LinearSegmentedColormap
 
 
+import torch
+
 #in plotDriftTransform, add legend and gausian distribution for x and y points
 
 #Replace list variables that are unchanging with tuples, more efficient for calculations
 
-#Add legend for graphs 
+#Add legend for graphs
 
 # In the future, for twiss parameters and other methods, instead of taking entire 2D particle array,
 # only perform calculations on just one variable list for faster performance while making optispeed function
@@ -76,95 +78,89 @@ class beam:
         gamma = twiss_axis[r"$\gamma$ (rad/m)"]
 
         # Ellipse bounds
-        x_max = xc + np.sqrt(emittance / (gamma - alpha ** 2 / beta))
-        x_min = xc - np.sqrt(emittance / (gamma - alpha ** 2 / beta))
-        y_max = yc + np.sqrt(emittance / (beta - alpha ** 2 / gamma))
-        y_min = yc - np.sqrt(emittance / (beta - alpha ** 2 / gamma))
+        x_max = xc + torch.sqrt(emittance / (gamma - alpha ** 2 / beta))
+        x_min = xc - torch.sqrt(emittance / (gamma - alpha ** 2 / beta))
+        y_max = yc + torch.sqrt(emittance / (beta - alpha ** 2 / gamma))
+        y_min = yc - torch.sqrt(emittance / (beta - alpha ** 2 / gamma))
 
-        x_vals = np.linspace(x_min, x_max, num_pts)
-        y_vals = np.linspace(y_min, y_max, num_pts)
-        X, Y = np.meshgrid(x_vals, y_vals)
+        x_vals = torch.linspace(x_min, x_max, num_pts)
+        y_vals = torch.linspace(y_min, y_max, num_pts)
+        X, Y = torch.meshgrid(x_vals, y_vals, indexing="xy")
 
         # Ellipse implicit equation Z
-        Z = gamma * (X - xc)** 2 + 2 * alpha * (X - xc) * (Y - yc) + beta * (Y - yc) ** 2 - emittance
+        Z = torch.Tensor(gamma * (X - xc) ** 2 + 2 * alpha * (X - xc) * (Y - yc) + beta * (Y - yc) ** 2 - emittance)
         return X, Y, Z
 
-    def cal_twiss(self, dist_6d, ddof=1):
-        '''
-        Calculates the Twiss parameters (emittance, alpha, beta, gamma, dispersion,
-        dispersion prime, and phase advance) for each of the three phase space axes (x, y, z)
-        from a 6D particle distribution.
+    def cal_twiss(self, dist_6d, ddof=1, device='cpu'):
+        """
+        Calculates Twiss parameters using PyTorch for 6D phase space distribution.
 
-        Parameters
-        ----------
-        dist_6d : np.ndarray
-            A 2D numpy array representing the 6D particle distribution.
-            Expected columns are typically [x, x', y, y', z, z'].
-        ddof : int, optional
-            Degrees of freedom for Bessel's correction in covariance calculation. Defaults to 1.
+        Parameters:
+        dist_6d (torch.Tensor): Shape (N, 6), phase space particles.
+        ddof (int): Delta Degrees of Freedom for covariance (usually 1).
+        device (str): 'cpu' or 'cuda'.
+        """
+        # Ensure input is a tensor on the correct device
+        if not isinstance(dist_6d, torch.Tensor):
+            dist_6d = torch.tensor(dist_6d, dtype=torch.float32, device=device)
+        else:
+            dist_6d = dist_6d.to(device)
 
-        Returns
-        -------
-        tuple
-            A tuple containing:
-                - dist_avg (np.ndarray): 1D array of the mean values for each of the 6 coordinates.
-                - dist_cov (np.ndarray): 6x6 covariance matrix of the particle distribution.
-                - twiss (pd.DataFrame): A DataFrame containing the calculated Twiss parameters
-                                        for 'x', 'y', and 'z' axes, with appropriate column labels.
-        '''
-        dist_avg = np.mean(dist_6d, axis=0)
-        dist_cov = np.cov(dist_6d, rowvar=False, ddof=ddof)
+        n_samples = dist_6d.size(0)
 
-        label_twiss = [r"$\epsilon$ ($\pi$.mm.mrad)", r"$\alpha$", r"$\beta$ (m)", r"$\gamma$ (rad/m)", r"$D$ (mm)",
-                       r"$D^{\prime}$ (mrad)", r"$\phi$ (deg)"]
+        # 1. Calculate Mean and Covariance Matrix
+        dist_avg = torch.mean(dist_6d, dim=0)
 
+        # Manual Covariance calculation: Cov = (X - mean)^T @ (X - mean) / (N - ddof)
+        centered_dist = dist_6d - dist_avg
+        dist_cov = torch.mm(centered_dist.t(), centered_dist) / (n_samples - ddof)
+
+        # 2. Extract variances and covariances for all 3 planes (x, y, z)
+        # Indices: x(0,1), y(2,3), z(4,5)
+        idx = torch.tensor([0, 2, 4], device=device)
+        idx_prime = torch.tensor([1, 3, 5], device=device)
+
+        var = dist_cov[idx, idx]              # [var_x, var_y, var_z]
+        var_prime = dist_cov[idx_prime, idx_prime]
+        covar = dist_cov[idx, idx_prime]
+
+        sigma_delta = dist_cov[5, 5]  # variance of (δW/W)^2
+
+        # 3. Dispersion Correction (Transverse: x, y; Longitudinal: z)
+        # D = Cov(u, δ) / Var(δ)
+        # We only correct for indices 0 and 1 (x and y)
+        D = torch.zeros(3, device=device)
+        D_prime = torch.zeros(3, device=device)
+
+        D[:2] = dist_cov[idx[:2], 5] / sigma_delta
+        D_prime[:2] = dist_cov[idx_prime[:2], 5] / sigma_delta
+
+        # Correct variances and covariances
+        # For z plane (index 2), D and D_prime are 0, so the formula remains original
+        var_corr = var - D**2 * sigma_delta
+        var_prime_corr = var_prime - D_prime**2 * sigma_delta
+        covar_corr = covar - D * D_prime * sigma_delta
+
+        # 4. Calculate Twiss Parameters (Vectorized)
+        epsilon = torch.sqrt(torch.clamp(var_corr * var_prime_corr - covar_corr**2, min=1e-15))
+        alpha = -covar_corr / epsilon
+        beta = var_corr / epsilon
+        gamma = var_prime_corr / epsilon
+
+        # 5. Phase Advance calculation
+        phi_rad = 0.5 * torch.atan2(2 * alpha, gamma - beta)
+        phi_deg = torch.rad2deg(phi_rad)
+
+        # 6. Format back to Pandas (for compatibility with your existing plotting/logging)
+        label_twiss = [r"$\epsilon$ ($\pi$.mm.mrad)", r"$\alpha$", r"$\beta$ (m)",
+                       r"$\gamma$ (rad/m)", r"$D$ (mm)", r"$D^{\prime}$ (mrad)", r"$\phi$ (deg)"]
         label_axes = ["x", "y", "z"]
 
-        twiss_data = []
+        # Stack results into a (3, 7) tensor
+        twiss_matrix = torch.stack([epsilon, alpha, beta, gamma, D, D_prime, phi_deg], dim=1)
 
-        sigma_delta = dist_cov[5, 5]  # variance of (10^-3 δW/W)^2, dimensionless
-
-        for i in range(3):
-            idx, idx_prime = 2 * i, 2 * i + 1
-
-            var = dist_cov[idx, idx]
-            var_prime = dist_cov[idx_prime, idx_prime]
-            covar = dist_cov[idx, idx_prime]
-
-            if i < 2:
-                 # Transverse planes with dispersion
-                D = dist_cov[idx, 5] / sigma_delta
-                D_prime = dist_cov[idx_prime, 5] / sigma_delta
-
-                # Dispersion-corrected variances
-                var_disp_free = var - D ** 2 * sigma_delta
-                var_prime_disp_free = var_prime - D_prime ** 2 * sigma_delta
-                covar_disp_free = covar - D * D_prime * sigma_delta
-
-                # Intrinsic emittance
-                epsilon = np.sqrt(var_disp_free * var_prime_disp_free - covar_disp_free ** 2)
-
-                alpha = -covar_disp_free / epsilon
-                beta = var_disp_free / epsilon
-                gamma = var_prime_disp_free / epsilon
-
-                dispersion = D
-                dispersion_prime = D_prime
-            else:
-                # Longitudinal plane (no dispersion)
-                epsilon = np.sqrt(var * var_prime - covar ** 2)
-                alpha = -covar / epsilon
-                beta = var / epsilon
-                gamma = var_prime / epsilon
-                dispersion = dispersion_prime = 0.0
-
-            # Standardized phase advance φ calculation
-            phi_rad = 0.5 * np.arctan2(2 * alpha, gamma - beta)
-            phi_deg = np.rad2deg(phi_rad)
-
-            twiss_data.append([epsilon, alpha, beta, gamma, dispersion, dispersion_prime, phi_deg])
-
-        twiss = pd.DataFrame(twiss_data, columns=label_twiss, index=label_axes[:3])
+        # Move back to CPU for DataFrame conversion
+        twiss = pd.DataFrame(twiss_matrix.cpu().numpy(), columns=label_twiss, index=label_axes)
 
         return dist_avg, dist_cov, twiss
 
@@ -188,16 +184,19 @@ class beam:
             A 2D numpy array of shape (num_particles, 6) containing the generated
             6D Gaussian distributed particle data.
         '''
-        particles = np.random.normal(mean, std_dev, size=(num_particles, 6))
+
+        mean_tensor = torch.full((6,), float(mean))
+
+        if not isinstance(std_dev, torch.Tensor):
+            std_dev = torch.tensor(std_dev)
+
+
+        mean_expanded = mean_tensor.expand(num_particles, 6)
+        std_expanded = std_dev.expand(num_particles, 6)
+
+        particles = torch.normal(mean_expanded, std_expanded)
+
         return particles
-    
-
-
-
-
-
-
-
 
 
     '''
@@ -236,10 +235,10 @@ class beam:
         gamma = twiss_axis[r"$\gamma$ (rad/m)"]
 
         # Calculate the ellipse equation
-        Z = gamma * (x - xc) ** 2 + 2 * alpha * (x - xc) * (y - yc) + beta * (y - yc) ** 2 - emittance
+        Z = torch.Tensor(gamma * (x - xc) ** 2 + 2 * alpha * (x - xc) * (y - yc) + beta * (y - yc) ** 2 - emittance)
 
         # Check if the point (x, y) is inside or on the ellipse
-        return Z <= 0
+        return (Z <= 0).item()
 
     '''
     THIS FUNCTION BELOW IS A WIP
@@ -273,25 +272,28 @@ class beam:
             ax = axes[i // 2, i % 2]
             twiss_axis = twiss.loc[axis]
             X, Y, Z = self.ellipse_sym(dist_avg[2 * i], dist_avg[2 * i + 1], twiss_axis, n=n, num_pts=60)
-            
+
             # Plot particle points and ellipse contours
             ax.scatter(dist_6d[:, 2 * i], dist_6d[:, 2 * i + 1], s=15, alpha=0.7)
             ax.contour(X, Y, Z, levels=[0], colors='black', linestyles='--')
 
             # Evaluate particles within ellipse
-            num_within_ellipse = 0 
-            for j in range(len(dist_6d)):
-                x, y = dist_6d[j, 2 * i], dist_6d[j, 2 * i + 1] #  Retrives x and y from each value list
-                # Check if the particle is within the ellipse
-                if self.is_within_ellipse(x, y, dist_avg[2 * i], dist_avg[2 * i + 1], twiss_axis, n = n):
-                    num_within_ellipse += 1
+            alpha = twiss_axis[r"$\alpha$"]
+            beta = twiss_axis[r"$\beta$ (m)"]
+            gamma = twiss_axis[r"$\gamma$ (rad/m)"]
+            emittance = n * twiss_axis[r"$\epsilon$ ($\pi$.mm.mrad)"]
+            xc,yc = dist_avg[2 * i], dist_avg[2 * i + 1]
 
-          
+            X_all = dist_6d[:, 2 * i]
+            Y_all = dist_6d[:, 2 * i + 1]
+            Z_all = torch.tensor(gamma * (X_all-xc)**2 + 2 * alpha * (X_all-xc) * (Y_all-yc) + beta * (Y_all-yc)**2 - emittance,dtype=torch.float32)
+            num_within_ellipse = torch.sum(Z_all <= 0).item()
+
             twiss_txt = '\n'.join(f'{label}: {np.round(value, 2)}' for label, value in twiss_axis.items())
             props = dict(boxstyle='round', facecolor='lavender', alpha=0.5)
             ax.text(0.05, 0.95, twiss_txt, transform=ax.transAxes, fontsize=12,
                     verticalalignment='top', bbox=props)
-            
+
             count_within_ellipse.append(num_within_ellipse)
             # Optional: Display the count on the plot
             ax.set_title(f'{axis} - Phase Space\nParticles within ellipse: {num_within_ellipse}')
@@ -380,7 +382,7 @@ class beam:
         ebeam = beam()
         dist_avg, dist_cov, twiss = ebeam.cal_twiss(particles, ddof=self.DDOF)
         return twiss.loc[variable].loc[r"$\alpha$"]
-    
+
     def epsilon(self, particles, variable):
         '''
         Calculates the emittance (epsilon) Twiss parameter for a given variable.
@@ -400,7 +402,7 @@ class beam:
         ebeam = beam()
         dist_avg, dist_cov, twiss = ebeam.cal_twiss(particles, ddof=self.DDOF)
         return twiss.loc[variable].loc[r"$\epsilon$ ($\pi$.mm.mrad)"]
-    
+
     def beta(self, particles, variable):
         '''
         Calculates the beta Twiss parameter for a given variable.
@@ -420,7 +422,7 @@ class beam:
         ebeam = beam()
         dist_avg, dist_cov, twiss = ebeam.cal_twiss(particles, ddof=self.DDOF)
         return twiss.loc[variable].loc[r"$\beta$ (m)"]
-    
+
     def gamma(self, particles, variable):
         '''
         Calculates the gamma Twiss parameter for a given variable.
@@ -440,7 +442,7 @@ class beam:
         ebeam = beam()
         dist_avg, dist_cov, twiss = ebeam.cal_twiss(particles, ddof=self.DDOF)
         return twiss.loc[variable].loc[r"$\gamma$ (rad/m)"]
-    
+
     def phi(self, particles, variable):
         '''
         Calculates the phi Twiss parameter (phase advance) for a given variable.
@@ -460,7 +462,7 @@ class beam:
         ebeam = beam()
         dist_avg, dist_cov, twiss = ebeam.cal_twiss(particles, ddof=self.DDOF)
         return twiss.loc[variable].loc[r"$\phi$ (deg)"]
-    
+
     def envelope(self, particles, variable):
         '''
         Calculates the beam envelope for a given variable.
@@ -479,13 +481,13 @@ class beam:
         float
             The beam envelope.
         '''
-        ebeam = beam()
-        dist_avg, dist_cov, twiss = ebeam.cal_twiss(particles, ddof=self.DDOF)
+        # ebeam = beam()
+        dist_avg, dist_cov, twiss = self.cal_twiss(particles, ddof=self.DDOF)
         emittance = (10 ** -6) * twiss.loc[variable].loc[r"$\epsilon$ ($\pi$.mm.mrad)"]
-        beta = twiss.loc[variable].loc[r"$\beta$ (m)"]
-        envelope = (10 ** 3) * np.sqrt(emittance * beta)
+        beta = torch.tensor(twiss.loc[variable].loc[r"$\beta$ (m)"])
+        envelope = (10 ** 3) * torch.sqrt(emittance * beta)
         return envelope
-    
+
     def disper(self, particles, variable):
         '''
         Calculates the dispersion (D) Twiss parameter for a given variable.
@@ -507,9 +509,9 @@ class beam:
         return twiss.loc[variable].loc[r"$D$ (mm)"]
 
 
-        
 
-    
+
+
 
 
 
@@ -544,10 +546,10 @@ class beam:
             std1.append([X,Y,Z])
             X, Y, Z = self.ellipse_sym(dist_avg[2 * i], dist_avg[2 * i + 1], twiss_axis, n=6, num_pts=num_pts)
             std6.append([X,Y,Z])
-        
+
         return std1, std6, dist_6d, twiss
 
-    def plotXYZ(self, dist_6d, std1, std6, twiss, ax1, ax2, ax3, ax4, 
+    def plotXYZ(self, dist_6d, std1, std6, twiss, ax1, ax2, ax3, ax4,
                 maxVals = [0,0,0,0,0,0], minVals = [0,0,0,0,0,0], defineLim=True, shape={}, scatter=False):
         '''
         Plots 2D phase spaces (x-x', y-y', z-z') and the x-y spatial distribution
@@ -592,7 +594,7 @@ class beam:
                     r'Position $y$ (mm)']
         label_twiss_z = ["$\epsilon$ ($\pi$.$10^{-6}$)", r"$\alpha$", r"$\beta$", r"$\gamma$", r"$D$ (m)",
                        r"$D^{\prime}$ (mrad)", r"$\phi$ (deg)"]
-        
+
         #  Plot x-x', y-y', z-z' phase spaces
         for i, axis in enumerate(twiss.index):
             twiss_axis = twiss.loc[axis]
@@ -607,7 +609,7 @@ class beam:
                 # print(ax1.get_ylim())
                 # ax.set(xlim=(-maxVals[2*i], maxVals[2*i]), ylim=(-maxVals[2*i + 1], maxVals[2*i + 1]))
 
-            #  Plot particle axes data with sigma 1, sigma 6 
+            #  Plot particle axes data with sigma 1, sigma 6
             self.heatmap(ax, dist_6d[:, 2 * i], dist_6d[:, 2 * i + 1], scatter=scatter)
             ax.contour(std1[i][0], std1[i][1], std1[i][2], levels=[0], colors='black', linestyles='--')
             ax.contour(std6[i][0], std6[i][1], std6[i][2], levels=[0], colors='black', linestyles='--')
@@ -729,42 +731,43 @@ class beam:
         # Heatmap with hexagonal tiles
         else:
             return axes.hexbin(x, y, cmap=cmap, extent=shapeExtent, gridsize=self.BINS, zorder=zorder)
-            #  cb = ax.figure.colorbar(hb, ax=ax, label='Point Count per Bin') # hb from axes.hexbin return 
+            #  cb = ax.figure.colorbar(hb, ax=ax, label='Point Count per Bin') # hb from axes.hexbin return
 
     def twiss_to_cov(self, alpha, beta, epsilon):
-        gamma = (1 + alpha**2) / beta
-        cov = epsilon * np.array([
+        gamma = torch.tensor((1 + alpha**2) / beta,dtype=torch.float32)
+        cov = epsilon * torch.tensor([
             [beta, -alpha],
             [-alpha, gamma]
-        ])
+        ], dtype=torch.float32)
         return cov
 
     def rotate_cov(self, cov, phi):
-        R = np.array([
-            [np.cos(phi), -np.sin(phi)],
-            [np.sin(phi),  np.cos(phi)]
+        cov = torch.tensor(cov, dtype=torch.float32)
+        R = torch.tensor([
+            [torch.cos(phi), -torch.sin(phi)],
+            [torch.sin(phi),  torch.cos(phi)]
         ])
         return R @ cov @ R.T
 
-    def gen_6d_from_twiss(self, twiss_params, num_particles=100):
-        # twiss_params: dict with keys 'x', 'y', 'z', each value is (alpha, beta, epsilon, phi)
+    def gen_6d_from_twiss(self, twiss_params, num_particles=100, device='cpu'):
+        """Generates 6D particle distribution using PyTorch's distribution API."""
         cov_blocks = []
-        mean = np.zeros(6)
-        for i, plane in enumerate(['x', 'y', 'z']):
+        mean = torch.zeros(6, dtype=torch.float32, device=device)
+
+        for plane in ['x', 'y', 'z']:
             params = twiss_params[plane]
-            alpha = float(params['alpha'])
-            beta = float(params['beta'])
-            epsilon = float(params['epsilon'])
-            phi = float(params['phi'])
-            print(f"Generating covariance for plane {plane} with alpha={alpha}, beta={beta}, epsilon={epsilon}, phi={phi}")
-            cov2d = self.twiss_to_cov(alpha, beta, epsilon)
-            cov2d_rot = self.rotate_cov(cov2d, phi)
-            cov_blocks.append(cov2d_rot)
-        # Build 6D covariance matrix (block diagonal)
-        cov6d = np.block([
-            [cov_blocks[0], np.zeros((2,2)), np.zeros((2,2))],
-            [np.zeros((2,2)), cov_blocks[1], np.zeros((2,2))],
-            [np.zeros((2,2)), np.zeros((2,2)), cov_blocks[2]],
-        ])
-        particles = np.random.multivariate_normal(mean, cov6d, size=num_particles)
-        return particles
+            # Extract and compute 2D blocks
+            cov2d = self.twiss_to_cov(params['alpha'], params['beta'], params['epsilon'])
+            cov2d_rot = self.rotate_cov(cov2d, params['phi'])
+            cov_blocks.append(cov2d_rot.to(device))
+
+        # 1. Use torch.block_diag (The equivalent of np.block for this diagonal structure)
+        cov6d = torch.block_diag(cov_blocks[0], cov_blocks[1], cov_blocks[2])
+
+        # 2. Use MultivariateNormal for high-performance sampling
+        # This handles the Cholesky decomposition internally
+        dist = torch.distributions.MultivariateNormal(mean, cov6d)
+
+        # 3. Generate particles
+        particles = dist.sample((num_particles,))
+        return particles, cov6d

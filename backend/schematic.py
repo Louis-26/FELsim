@@ -86,26 +86,35 @@ class draw_beamline:
         y_transform: list[float]
             list containing each particles' y position
         '''
-        x_pos = values[:, 0]
-        phase_x = values[:, 1]
-        y_pos = values[:, 2]
-        phase_y = values[:, 3]
-        x_transform = []
-        y_transform = []
 
-        for i in range(len(x_pos)):
-            x_transform.append(x_pos[i]+length*phase_x[i])
-        for i in range(len(y_pos)):
-            y_transform.append(y_pos[i] + length*phase_y[i])
+
+        v = torch.as_tensor(values, dtype=torch.float32)
+        l = torch.as_tensor(length, dtype=torch.float32)
+
+
+        x_pos, phase_x = v[:, 0], v[:, 1]
+        y_pos, phase_y = v[:, 2], v[:, 3]
+
+
+        x_transform = x_pos + l * phase_x
+        y_transform = y_pos + l * phase_y
+
 
         if plot:
-            fig, ax = plt.subplots()
-            ax.scatter(x_pos,y_pos, c = 'blue', s=15, alpha=0.7, label = "Initial values")
-            ax.scatter(x_transform, y_transform, c = 'green', s=15, alpha=0.7, label = "Transformed values")
+
+            x_p_np = x_pos.cpu().numpy()
+            y_p_np = y_pos.cpu().numpy()
+            x_t_np = x_transform.cpu().numpy()
+            y_t_np = y_transform.cpu().numpy()
+
+            fig, ax = plt.subplots(figsize=(8, 6))
+            ax.scatter(x_p_np, y_p_np, c='blue', s=5, alpha=0.5, label="Initial values")
+            ax.scatter(x_t_np, y_t_np, c='green', s=5, alpha=0.5, label="Transformed values")
+
             ax.set_xlabel('Position x (mm)')
             ax.set_ylabel('Position y (mm)')
-            plt.legend(loc = 'upper right')
-            plt.suptitle("Drift Transformation over " + str(length) + " mm")
+            ax.legend(loc='upper right')
+            plt.suptitle(f"Drift Transformation (Vectorized) over {length} mm")
             plt.tight_layout()
             plt.show()
 
@@ -133,21 +142,14 @@ class draw_beamline:
         minval: list[float]
             updated list of minimum values
         '''
-        initialx = matrixVariables[:, 0]
-        initialy = matrixVariables[:, 2]
-        initialxphase = matrixVariables[:, 1]
-        initialyphase = matrixVariables[:, 3]
-        initialz = matrixVariables[:, 4]
-        initialzphase = matrixVariables[:, 5]
-        initialList = [initialx, initialxphase, initialy, initialyphase, initialz, initialzphase]
-        for i in range(len(initialList)):
-            maximum = max(initialList[i])
-            if maximum > maxval[i]:
-                maxval[i] = maximum
-            minimum = min(initialList[i])
-            if minimum < minval[i]:
-                minval[i] = minimum
-        return maxval, minval
+        matrixVariables=torch.tensor(matrixVariables, dtype=torch.float32)
+        list_max=torch.max(matrixVariables, dim=0).values
+        list_min=torch.min(matrixVariables, dim=0).values
+
+        updated_max=torch.maximum(list_max, torch.tensor(maxval,dtype=torch.float32))
+        updated_min=torch.minimum(list_min, torch.tensor(minval,dtype=torch.float32))
+
+        return updated_max.cpu().numpy().tolist(), updated_min.cpu().numpy().tolist()
 
     
 
