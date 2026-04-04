@@ -1,3 +1,11 @@
+import os, sys
+
+current_dir = os.path.abspath(os.getcwd())
+project_root = os.path.abspath(os.path.join(current_dir, '..'))
+
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+    
 #   Authors:
 from pathlib import Path
 from ebeam import beam
@@ -42,9 +50,13 @@ Generate beamline() elements
 
 pd.set_option('display.max_rows', None)
 # Create beamline from Excel file
-path2 = r"C:\Users\NielsB\cernbox\Hawaii University\Beam dynamics\FELsim"
-path1 = r"C:\Users\User\Documents\FELsim"
-directory = Path(path2)
+# path2 = r"C:\Users\NielsB\cernbox\Hawaii University\Beam dynamics\FELsim"
+# path1 = r"C:\Users\User\Documents\FELsim"
+
+current_path = Path.cwd()
+directory = current_path.parents[1] / 'beam_excel'
+
+
 # file_path = directory / 'Beamline_elements.xlsx'
 file_path = directory / 'Beamline_elements.xlsx'
 excel = ExcelElements(file_path)
@@ -54,7 +66,7 @@ beamlineUH = excel.create_beamline()
 # if len(beamline) >= 5:
 #     beamline = beamline[:-5]
 schem = draw_beamline()
-beamtype = beamline()
+beamtype = Beamline()
 line_UH = beamtype.changeBeamType(beamlineUH, "electron", 40)
 
 print('Beamline nb of Elements: ' + str(len(line_UH)))

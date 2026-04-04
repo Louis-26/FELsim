@@ -1,3 +1,12 @@
+import os, sys
+
+current_dir = os.path.abspath(os.getcwd())
+project_root = os.path.abspath(os.path.join(current_dir, '..'))
+
+
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+    
 from ebeam import beam
 from schematic import draw_beamline
 from beamline import *

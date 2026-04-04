@@ -190,7 +190,8 @@ class beamOptimizer():
             if "bounds" in startPoint.get(var): self.bounds[index] = startPoint.get(var).get("bounds")
 
         # Time speed to minimize difference of objective function
-        startTime = time.perf_counter()  
+        startTime = time.perf_counter()
+        # print("degug beamOptimizer 194: ",self._optiSpeed, self.variablesValues)
         result = spo.minimize(self._optiSpeed, self.variablesValues, method=method, bounds=self.bounds)
         endTime = time.perf_counter()
 

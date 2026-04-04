@@ -190,21 +190,22 @@ class beamOptimizer():
             if "bounds" in startPoint.get(var): self.bounds[index] = startPoint.get(var).get("bounds")
 
         # Time speed to minimize difference of objective function
-        startTime = time.perf_counter()  
+        startTime = time.perf_counter()
+        # print("debug beamOptimizer 194: ",self._optiSpeed, self.variablesValues)
         result = spo.minimize(self._optiSpeed, self.variablesValues, method=method, bounds=self.bounds)
         endTime = time.perf_counter()
 
         # print out new values for each beam segment's attribute
         output = "\nx variables:"
         for indice in self.segmentVar:
-                variable = self.segmentVar.get(indice)[0]
-                index = self.variablesToOptimize.index(variable)
-                yFunc = self.segmentVar.get(indice)[2]
-                newVal = yFunc(result.x[index])
-                segAttr = self.segmentVar.get(indice)[1]
-                setattr(self.beamline[indice], segAttr, newVal)
-                if printResults:
-                    output += "\nindice " + str(indice) + " new " + segAttr + " value: " + str(newVal)
+            variable = self.segmentVar.get(indice)[0]
+            index = self.variablesToOptimize.index(variable)
+            yFunc = self.segmentVar.get(indice)[2]
+            newVal = yFunc(result.x[index])
+            segAttr = self.segmentVar.get(indice)[1]
+            setattr(self.beamline[indice], segAttr, newVal)
+            if printResults:
+                output += "\nindice " + str(indice) + " new " + segAttr + " value: " + str(newVal)
         if printResults:
             output += "\n\ny objectives:\n"
             for indice, value in self.objectives.items():
@@ -220,8 +221,13 @@ class beamOptimizer():
             fig, ax = plt.subplots(2,1)
             handles = []
 
+            # CRITICAL: Ensure self.plotIterate and self.plotMSE are NumPy compatible
+            # If they were collected as Tensors, convert them here
+            plot_iterate_np = np.array([i.item() if torch.is_tensor(i) else i for i in self.plotIterate])
+            plot_mse_np = np.array([m.item() if torch.is_tensor(m) else m for m in self.plotMSE])
+
             # plot MSE line
-            mseLine, =ax[1].plot(self.plotIterate, self.plotMSE, label = 'Mean Squared Error', color = 'black')
+            mseLine, = ax[1].plot(plot_iterate_np, plot_mse_np, label='Mean Squared Error', color='black')
             ax[1].set_xlabel('Iterations')
             ax[1].set_yscale('log')
             ax[1].set_ylabel('Mean Squared Error')
@@ -231,34 +237,47 @@ class beamOptimizer():
 
             # Plot y goals
             ax2 = ax[1].twinx()
-            mini = 0
+            mini = 1e-6 # Default small value to avoid log(0)
+            
             for i, key in enumerate(self.trackGoals):
-                valLine, = ax2.plot(self.plotIterate, self.trackGoals[key], label = key)
+                # CONVERSION: Convert the tracked goal list to a NumPy array for Matplotlib
+                goal_data = np.array([g.item() if torch.is_tensor(g) else g for g in self.trackGoals[key]])
+                
+                valLine, = ax2.plot(plot_iterate_np, goal_data, label=key)
                 handles.append(valLine)
-                tempMin = abs(min(self.trackGoals[key]))
-                if i == 0 or mini>tempMin:
+                
+                # Use numpy for absolute minimum calculation
+                tempMin = np.abs(goal_data).min() if len(goal_data) > 0 else 1e-6
+                if i == 0 or mini > tempMin:
                     mini = tempMin
-            ax2.set_yscale('symlog', linthresh=10**(np.ceil(np.log10(mini))))
+            
+            # FIX: Use a scalar float for linthresh, not a Tensor
+            lin_thresh_val = 10**(np.ceil(np.log10(float(mini)))) if mini > 0 else 1e-6
+            ax2.set_yscale('symlog', linthresh=lin_thresh_val)
             ax2.set_ylabel('Objective functions')
-            ax2.legend(handles = handles, loc = 'upper right')
+            ax2.legend(handles=handles, loc='upper right')
 
             # Plot x variables + sec/iteration
-            tempTrackVari = np.array(self.trackVariables)
+            # CONVERSION: Ensure trackVariables is a pure NumPy array
+            tempTrackVari = np.array([[v.item() if torch.is_tensor(v) else v for v in row] for row in self.trackVariables])
+            
             handles = []
             for i in range(len(tempTrackVari[0])):
-                varLine, = ax[0].plot(self.plotIterate, tempTrackVari[:,i], label = self.variablesToOptimize[i])
+                varLine, = ax[0].plot(plot_iterate_np, tempTrackVari[:,i], label=self.variablesToOptimize[i])
                 handles.append(varLine)
+            
             ax[0].set_xlabel('Iterations')
             ax[0].set_ylabel('Variable values')
             ax[0].set_title('Variable Values through each Iteration')
-            timeLine = mlines.Line2D([], [], color = 'white', label=f'{round((endTime-startTime)/self.iterationTrack,4)} s/iteration')
+            
+            calc_time = (endTime-startTime)/self.iterationTrack if self.iterationTrack > 0 else 0
+            timeLine = mlines.Line2D([], [], color='white', label=f'{round(calc_time, 4)} s/iteration')
             handles.append(timeLine)
-            ax[0].legend(handles = handles, loc = 'upper right')
+            ax[0].legend(handles=handles, loc='upper right')
 
-           
             plt.tight_layout()
             plt.show()
-
+            
         # Plot beam simulation with new values
         if plotBeam:
             schem = draw_beamline()

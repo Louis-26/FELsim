@@ -36,10 +36,18 @@ npm install
 npm run dev
 ```
 
+# reproduce the results in backend with original version
+## beamline_optimization.ipynb results
+```bash
+cd $(git rev-parse --show-toplevel)/backend_orig/test
+jupyter nbconvert --to pdf --execute beamline_optimization.ipynb --output beam
+line_optimization_res.pdf
+```
 
-# test the results in backend
+
+# test the results in backend with pytorch version
 ## beamline_optimization.ipynb results
 ```bash
 cd $(git rev-parse --show-toplevel)/backend/test
-jupyter nbconvert --to pdf --execute beamline_optimization.ipynb --output beamline_optimization_res.pdf
+jupyter nbconvert --to pdf --execute beamline_optimization.ipynb --output beamline_optimization_pytorch_res.pdf
 ```

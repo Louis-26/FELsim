@@ -16,5 +16,5 @@ Overall, python files under `backend` have been converted to pytorch versions wh
 - ✅summarize potential code bugs under [here](../modify_summary/original_file_error.md)
 
 ## step 4
-- ⏳go through the test code under `backend/test`
+- ✅run through the test code under `backend/test` [here](../project_basics/finished_test.md), and get bugs and solutions [here](../modify_summary/original_file_error.md)
 - ✅give test cases for each modified file to ensure code is working, [here](../modify_test_cases)

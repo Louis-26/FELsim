@@ -72,10 +72,10 @@ class beam:
                                   $\gamma (x-x_c)^2 + 2\alpha (x-x_c)(y-y_c) + \beta (y-y_c)^2 - \epsilon_{n} = 0$,
                                   where $\epsilon_{n} = n \times \epsilon$.
         '''
-        emittance = n * twiss_axis[r"$\epsilon$ ($\pi$.mm.mrad)"]
-        alpha = twiss_axis[r"$\alpha$"]
-        beta = twiss_axis[r"$\beta$ (m)"]
-        gamma = twiss_axis[r"$\gamma$ (rad/m)"]
+        emittance = torch.tensor(n * twiss_axis[r"$\epsilon$ ($\pi$.mm.mrad)"], dtype=torch.float32)
+        alpha = torch.tensor(twiss_axis[r"$\alpha$"], dtype=torch.float32)
+        beta = torch.tensor(twiss_axis[r"$\beta$ (m)"], dtype=torch.float32)
+        gamma = torch.tensor(twiss_axis[r"$\gamma$ (rad/m)"], dtype=torch.float32)
 
         # Ellipse bounds
         x_max = xc + torch.sqrt(emittance / (gamma - alpha ** 2 / beta))

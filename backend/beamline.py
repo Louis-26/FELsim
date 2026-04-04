@@ -91,7 +91,7 @@ class lattice:
         self.M = mass
         self.Q = charge
         self.E0 = restE
-        self.gamma = (1 + (self.E/self.E0))
+        self.gamma = torch.tensor(1 + (self.E/self.E0))
         self.beta = torch.sqrt(1-(1/(self.gamma**2)))
 
     def changeBeamType(self, particleType, kineticE, beamSegments = None):
@@ -191,14 +191,20 @@ class lattice:
             after passing through the segment.
 
         '''
+        # print("val type before transform",type(val))
+        if not isinstance(val, torch.Tensor):
+            val=torch.tensor(val, dtype=torch.float64)
+        val = val.to(torch.float64)
         # transformation matrix M with the size 6*6, where the new particle P'=MP
         mat = self.getSymbolicMatrice(numeric = True, **kwargs)
-        # transform into torch tensor
-        mat_tensor = torch.tensor(np.array(mat).astype(np.float64),
-                                  dtype=val.dtype,
-                                  device=val.device)
 
+        # transform into torch tensor
+        # print("mat type before transform", type(mat), mat.dtype)
+        # mat_tensor = torch.tensor(mat, dtype=torch.float64).reshape(-1, 6)
+        mat_tensor = mat.to(torch.float64).reshape(-1, 6)
         # parallelized matrix multiplication
+        # print("debug, val and mat shape",val.shape,mat_tensor.shape)
+        # print("debug, val and mat dtype",val.dtype,mat_tensor.dtype)
         new_val_tensor = torch.matmul(val, mat_tensor.T)
         new_val_tensor = new_val_tensor.cpu().numpy().tolist()
         return new_val_tensor

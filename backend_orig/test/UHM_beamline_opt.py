@@ -1,3 +1,12 @@
+import os, sys
+
+current_dir = os.path.abspath(os.getcwd())
+project_root = os.path.abspath(os.path.join(current_dir, '..'))
+
+
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+    
 # Import Python modules
 import sys
 import time
@@ -9,7 +18,7 @@ import sympy.plotting as plot
 
 # Import Beam Dynamics modules
 from ebeam import beam
-from beamline import lattice, beamline
+from beamline import lattice, Beamline
 from schematic import draw_beamline
 from excelElements import ExcelElements
 from beamOptimizer import beamOptimizer
@@ -59,8 +68,11 @@ y_prime_std_m = np.sqrt(epsilon * 1e-6 / beta_ym) # Beam at waist so Gamma(z_w) 
 print(y_prime_std_m)
 
 # Load Beamline from Excel
-path = Path(r"C:\Users\NielsB\cernbox\Hawaii University\Beam dynamics\UH_FELxBeamDyn")
-file_path = path / 'Beamline_elements.xlsx'
+current_path = Path.cwd()
+directory = current_path.parents[1] / 'beam_excel'
+file_path = directory / 'Beamline_elements.xlsx'
+
+
 excel = ExcelElements(file_path)
 df = excel.get_dataframe()
 beamlineUH = excel.create_beamline()

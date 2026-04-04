@@ -1,3 +1,12 @@
+import os, sys
+
+current_dir = os.path.abspath(os.getcwd())
+project_root = os.path.abspath(os.path.join(current_dir, '..'))
+
+
+if project_root not in sys.path:
+    sys.path.insert(0, project_root)
+
 #   Authors:
 from pathlib import Path
 
@@ -63,10 +72,14 @@ Generate beamline() elements
 
 pd.set_option('display.max_rows', None)
 # Create beamline from Excel file
-path3 = r"/Users/***/Desktop/Documents/FELsim"
-path2 = r"C:\Users\NielsB\cernbox\Hawaii University\Beam dynamics\UH_FELxBeamDyn"
-path1 = r"C:\Users\User\Documents\FELsim"
-directory = Path(path2)
+# path3 = r"/Users/***/Desktop/Documents/FELsim"
+# path2 = r"C:\Users\NielsB\cernbox\Hawaii University\Beam dynamics\UH_FELxBeamDyn"
+# path1 = r"C:\Users\User\Documents\FELsim"
+
+current_path = Path.cwd()
+directory = current_path.parents[1] / 'beam_excel'
+
+
 file_path = directory / 'Beamline_elements.xlsx'
 #file_path = directory / 'Beamline_elements_2.xlsx'
 excel = ExcelElements(file_path)
@@ -85,7 +98,7 @@ replace all dipole wedge elements with drift elements
 # if len(beamline) >= 5:
 #     beamline = beamline[:-5]
 schem = draw_beamline()
-beamtype = beamline()
+beamtype = Beamline()
 line_UH = relat.changeBeamType("electron", Energy, beamlineUH)
 
 segments = 98
