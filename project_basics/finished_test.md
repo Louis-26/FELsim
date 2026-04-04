@@ -1,6 +1,6 @@
 # Test summary
 ## original
-- ✅`beamline_optimization.ipynb`
+- ✅`beamline_optimization.ipynb`, get [output pdf](../backend_orig/test/beamline_optimization_res.pdf)
 
 - ✅`goldTwiss.py`
 
@@ -14,7 +14,7 @@ not implemented for Beamline class
 - ✅`UHM_beamline_opt.py`
 
 ## pytorch
-- ⏳`beamline_optimization.ipynb`
+- ✅`beamline_optimization.ipynb`, get [output pdf](../backend/test/beamline_optimization_pytorch_res.pdf)
 
 - ✅`goldTwiss.py`
 
