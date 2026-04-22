@@ -72,7 +72,7 @@ class lattice:
         '''
         self.E = E
         self.gamma = (1 + (self.E/self.E0))
-        self.beta = np.sqrt(1-(1/(self.gamma**2)))
+        self.beta = torch.sqrt(1-(1/(self.gamma**2)))
 
     def setMQE(self, mass, charge, restE):
         '''
@@ -199,12 +199,8 @@ class lattice:
         mat = self.getSymbolicMatrice(numeric = True, **kwargs)
 
         # transform into torch tensor
-        # print("mat type before transform", type(mat), mat.dtype)
-        # mat_tensor = torch.tensor(mat, dtype=torch.float64).reshape(-1, 6)
         mat_tensor = mat.to(torch.float64).reshape(-1, 6)
         # parallelized matrix multiplication
-        # print("debug, val and mat shape",val.shape,mat_tensor.shape)
-        # print("debug, val and mat dtype",val.dtype,mat_tensor.dtype)
         new_val_tensor = torch.matmul(val, mat_tensor.T)
         new_val_tensor = new_val_tensor.cpu().numpy().tolist()
         return new_val_tensor

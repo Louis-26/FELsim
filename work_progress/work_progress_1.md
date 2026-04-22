@@ -18,3 +18,12 @@ Overall, python files under `backend` have been converted to pytorch versions wh
 ## step 4
 - ✅run through the test code under `backend/test` [here](../project_basics/finished_test.md), and get bugs and solutions [here](../modify_summary/original_file_error.md)
 - ✅give test cases for each modified file to ensure code is working, [here](../modify_test_cases)
+
+# Next step
+- data flow
+  - get  
+  - get what function is costly   
+- get run time comparison
+- use pytest/unitest
+- use claude.md 
+- take a look at [this](https://gist.github.com/karpathy/442a6bf555914893e9891c11519de94f)
