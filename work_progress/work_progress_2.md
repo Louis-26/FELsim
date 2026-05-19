@@ -41,4 +41,3 @@ do similar things to `optimizer_benchmarking.ipynb`,
 - determine some test cases as the benchmark to evaluate goodness of optimizers
 - evaluate whether GPU can help shorten execution time
 - figure out how to adjust test cases
-- 

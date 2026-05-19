@@ -144,7 +144,7 @@ listed in notebook
 | Metric         | PyTorch       | NumPy         |
 |----------------|--------------:|--------------:|
 | Iterations     | XXX           | XXX           |
-| Execution time | 152 min 35 s  | seem not to converge as it takes super long  |
+| Execution time | 152 min 35 s  | seem not to converge as it takes super long, 7h 49 min 45s |
 
 MSE: 
 pytorch 

@@ -297,8 +297,10 @@ class FELsimAdapter(SimulatorBase):
                 'alpha': twiss_df.loc[plane, r'$\alpha$'],
                 'gamma': twiss_df.loc[plane, r'$\gamma$ (rad/m)'],
                 'emittance': twiss_df.loc[plane, r'$\epsilon$ ($\pi$.mm.mrad)'],
-                'dispersion': twiss_df.loc[plane, r'$D$ (m)'],
-                'dispersion_prime': twiss_df.loc[plane, r"$D^{\prime}$"]
+                # 'dispersion': twiss_df.loc[plane, r'$D$ (m)'],
+                # 'dispersion_prime': twiss_df.loc[plane, r"$D^{\prime}$"],
+                'dispersion': twiss_df.loc[plane, r'$D$ (mm)'],
+                'dispersion_prime': twiss_df.loc[plane, r'$D^{\prime}$ (mrad)'],
             }
         return twiss
 
