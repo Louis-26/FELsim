@@ -71,7 +71,7 @@ class lattice:
             New kinetic energy value (MeV/c^2).
         '''
         self.E = E
-        self.gamma = (1 + (self.E/self.E0))
+        self.gamma = torch.tensor(1 + (self.E/self.E0))
         self.beta = torch.sqrt(1-(1/(self.gamma**2)))
 
     def setMQE(self, mass, charge, restE):

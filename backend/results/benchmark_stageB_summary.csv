@@ -1,0 +1,12 @@
+stage,mean_mse,min_mse,mean_nfev,mean_time
+Stage 1 Doublet,0.00016,0.00016,59.0,13.563
+Stage 2 Chrom.1,0.0,0.0,40.0,18.589
+Stage 3 Triplet1,0.00195,0.00195,112.0,86.037
+Stage 4 Chrom.2,0.0,0.0,40.0,45.413
+Stage 5 DblTriplet,0.07654,0.07654,229.0,244.351
+Stage 6 Chrom.3,0.0,0.0,40.0,66.195
+Stage 7 IP,0.00141,0.00141,85.0,144.334
+Stage 8 Doublet2,0.00118,0.00118,94.0,184.869
+Stage 9 Chrom.4,0.0,0.0,40.0,93.13
+Stage 10 Triplet3,0.0001,0.0001,181.0,566.62
+Stage 11 UND Match,0.22094,0.22094,370.0,1384.776

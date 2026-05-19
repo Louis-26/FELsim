@@ -82,9 +82,14 @@ no need to change
 ## 5) Data Ingestion
 
 ### ❌`backend/excelElements.py`
-no need to change
-
-
+```python
+# line 92-96, add str
+    if pd.notna(row['Fringe Field Enge coefficients']) and str(row['Fringe Field Enge coefficients']).strip():
+        enge_fct = [float(val.strip()) for val in str(row['Fringe Field Enge coefficients']).split(',') 
+                    if val.strip()]
+    else:
+        enge_fct = []
+```
 
 ## 6) Entry / Execution
 ### ❌`backend/main.py`

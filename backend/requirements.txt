@@ -17,3 +17,5 @@ safetensors
 tokenizers
 ipympl
 openpyxl
+ipykernel
+jupyter-autotime

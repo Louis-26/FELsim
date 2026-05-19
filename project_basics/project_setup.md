@@ -3,6 +3,7 @@
 download Docker
 ## step 2
 ```bash
+cd $(git rev-parse --show-toplevel)/
 docker compose pull
 docker compose up --build
 ```
