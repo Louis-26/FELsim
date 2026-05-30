@@ -15,3 +15,9 @@ focus on scenario A first
   - time
   - start point requirement
 - get the MSE plot of different optimization methods, similar to [this](../attachment/MSE_plot.png) 
+
+## finished work
+✅all finished
+details:
+- [scenario_A_analysis](../optimizer_compare/scenario_A_analysis.md)
+- [optimization_method_compare](../optimizer_compare/optimization_method_compare.md)
