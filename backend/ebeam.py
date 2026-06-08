@@ -72,10 +72,10 @@ class beam:
                                   $\gamma (x-x_c)^2 + 2\alpha (x-x_c)(y-y_c) + \beta (y-y_c)^2 - \epsilon_{n} = 0$,
                                   where $\epsilon_{n} = n \times \epsilon$.
         '''
-        emittance = torch.tensor(n * twiss_axis[r"$\epsilon$ ($\pi$.mm.mrad)"], dtype=torch.float32)
-        alpha = torch.tensor(twiss_axis[r"$\alpha$"], dtype=torch.float32)
-        beta = torch.tensor(twiss_axis[r"$\beta$ (m)"], dtype=torch.float32)
-        gamma = torch.tensor(twiss_axis[r"$\gamma$ (rad/m)"], dtype=torch.float32)
+        emittance = torch.tensor(n * twiss_axis[r"$\epsilon$ ($\pi$.mm.mrad)"], dtype=torch.float64)
+        alpha = torch.tensor(twiss_axis[r"$\alpha$"], dtype=torch.float64)
+        beta = torch.tensor(twiss_axis[r"$\beta$ (m)"], dtype=torch.float64)
+        gamma = torch.tensor(twiss_axis[r"$\gamma$ (rad/m)"], dtype=torch.float64)
 
         # Ellipse bounds
         x_max = xc + torch.sqrt(emittance / (gamma - alpha ** 2 / beta))
@@ -102,7 +102,7 @@ class beam:
         """
         # Ensure input is a tensor on the correct device
         if not isinstance(dist_6d, torch.Tensor):
-            dist_6d = torch.tensor(dist_6d, dtype=torch.float32, device=device)
+            dist_6d = torch.tensor(dist_6d, dtype=torch.float64, device=device)
         else:
             dist_6d = dist_6d.to(device)
 
@@ -164,7 +164,7 @@ class beam:
 
         return dist_avg, dist_cov, twiss
 
-    def gen_6d_gaussian(self, mean, std_dev, num_particles=100):
+    def gen_6d_gaussian(self, mean, std_dev, num_particles=100, dtype=torch.float64):
         '''
         Generates a 6D Gaussian distributed beam of particles.
 
@@ -196,7 +196,7 @@ class beam:
 
         particles = torch.normal(mean_expanded, std_expanded)
 
-        return particles
+        return particles.to(dtype=dtype)
 
 
     '''
@@ -286,7 +286,7 @@ class beam:
 
             X_all = dist_6d[:, 2 * i]
             Y_all = dist_6d[:, 2 * i + 1]
-            Z_all = torch.tensor(gamma * (X_all-xc)**2 + 2 * alpha * (X_all-xc) * (Y_all-yc) + beta * (Y_all-yc)**2 - emittance,dtype=torch.float32)
+            Z_all = torch.tensor(gamma * (X_all-xc)**2 + 2 * alpha * (X_all-xc) * (Y_all-yc) + beta * (Y_all-yc)**2 - emittance,dtype=torch.float64)
             num_within_ellipse = torch.sum(Z_all <= 0).item()
 
             twiss_txt = '\n'.join(f'{label}: {np.round(value, 2)}' for label, value in twiss_axis.items())
@@ -734,15 +734,15 @@ class beam:
             #  cb = ax.figure.colorbar(hb, ax=ax, label='Point Count per Bin') # hb from axes.hexbin return
 
     def twiss_to_cov(self, alpha, beta, epsilon):
-        gamma = torch.tensor((1 + alpha**2) / beta,dtype=torch.float32)
+        gamma = torch.tensor((1 + alpha**2) / beta,dtype=torch.float64)
         cov = epsilon * torch.tensor([
             [beta, -alpha],
             [-alpha, gamma]
-        ], dtype=torch.float32)
+        ], dtype=torch.float64)
         return cov
 
     def rotate_cov(self, cov, phi):
-        cov = torch.tensor(cov, dtype=torch.float32)
+        cov = torch.tensor(cov, dtype=torch.float64)
         R = torch.tensor([
             [torch.cos(phi), -torch.sin(phi)],
             [torch.sin(phi),  torch.cos(phi)]
@@ -752,7 +752,7 @@ class beam:
     def gen_6d_from_twiss(self, twiss_params, num_particles=100, device='cpu'):
         """Generates 6D particle distribution using PyTorch's distribution API."""
         cov_blocks = []
-        mean = torch.zeros(6, dtype=torch.float32, device=device)
+        mean = torch.zeros(6, dtype=torch.float64, device=device)
 
         for plane in ['x', 'y', 'z']:
             params = twiss_params[plane]

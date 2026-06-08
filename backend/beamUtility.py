@@ -49,9 +49,9 @@ class beamUtility:
 
         # 1. Input conversion to Tensors
         # Shape: (N_currents,)
-        I_tensor = torch.tensor(I_pulse_range, dtype=torch.float32)
+        I_tensor = torch.tensor(I_pulse_range, dtype=torch.float64)
         # Shape: (N_pulses,)
-        T_tensor = torch.tensor(T_pulse_values, dtype=torch.float32)
+        T_tensor = torch.tensor(T_pulse_values, dtype=torch.float64)
 
         fig, ax1 = plt.subplots(figsize=(10, 5))
 
@@ -167,10 +167,10 @@ class beamUtility:
         Eliminates all nested loops for physics calculations.
         """
         # 1. Coordinate conversion to Tensors
-        I_t = torch.tensor(I_pulse_range, dtype=torch.float32)      # Current [A]
-        T_t = torch.tensor(T_pulse_values, dtype=torch.float32)    # Duration [us]
-        R_t = torch.tensor(rep_rate_values, dtype=torch.float32)   # Rep Rate [Hz]
-        E_t = torch.tensor(E_energy_range, dtype=torch.float32)    # Energy [MeV]
+        I_t = torch.tensor(I_pulse_range, dtype=torch.float64)      # Current [A]
+        T_t = torch.tensor(T_pulse_values, dtype=torch.float64)    # Duration [us]
+        R_t = torch.tensor(rep_rate_values, dtype=torch.float64)   # Rep Rate [Hz]
+        E_t = torch.tensor(E_energy_range, dtype=torch.float64)    # Energy [MeV]
 
         # 2. Geometric calculations
         # Elliptical cross-section (6-sigma)

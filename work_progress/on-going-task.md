@@ -1,0 +1,3 @@
+- learn about trust-constr method theoretically
+- fine-tune the method options as the hyperparameters
+- compare between numpy version and pytorch version

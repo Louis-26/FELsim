@@ -88,8 +88,8 @@ class draw_beamline:
         '''
 
 
-        v = torch.as_tensor(values, dtype=torch.float32)
-        l = torch.as_tensor(length, dtype=torch.float32)
+        v = torch.as_tensor(values, dtype=torch.float64)
+        l = torch.as_tensor(length, dtype=torch.float64)
 
 
         x_pos, phase_x = v[:, 0], v[:, 1]
@@ -142,12 +142,12 @@ class draw_beamline:
         minval: list[float]
             updated list of minimum values
         '''
-        matrixVariables=torch.tensor(matrixVariables, dtype=torch.float32)
+        matrixVariables=torch.tensor(matrixVariables, dtype=torch.float64)
         list_max=torch.max(matrixVariables, dim=0).values
         list_min=torch.min(matrixVariables, dim=0).values
 
-        updated_max=torch.maximum(list_max, torch.tensor(maxval,dtype=torch.float32))
-        updated_min=torch.minimum(list_min, torch.tensor(minval,dtype=torch.float32))
+        updated_max=torch.maximum(list_max, torch.tensor(maxval,dtype=torch.float64))
+        updated_min=torch.minimum(list_min, torch.tensor(minval,dtype=torch.float64))
 
         return updated_max.cpu().numpy().tolist(), updated_min.cpu().numpy().tolist()
 

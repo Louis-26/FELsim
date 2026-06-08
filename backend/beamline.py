@@ -252,7 +252,7 @@ class driftLattice(lattice):
                       [0, 0, 0, 1, 0, 0],
                       [0, 0, 0, 0, 1, M56],
                       [0, 0, 0, 0, 0, 1]])
-        return torch.tensor(mat,dtype=torch.float32)
+        return torch.tensor(mat,dtype=torch.float64)
 
     def __str__(self):
         '''
@@ -347,7 +347,7 @@ class qpfLattice(lattice):
                         [0, 0, 0, 0, 1, M56],
                         [0, 0, 0, 0, 0, 1]])
 
-        return torch.tensor(mat,dtype=torch.float32)
+        return torch.tensor(mat,dtype=torch.float64)
 
     def __str__(self):
         '''
@@ -441,7 +441,7 @@ class qpdLattice(lattice):
                         [0, 0, 0, 0, 1, M56],
                         [0, 0, 0, 0, 0, 1]])
 
-        return torch.tensor(mat,dtype=torch.float32)
+        return torch.tensor(mat,dtype=torch.float64)
 
     def __str__(self):
         '''
@@ -528,7 +528,7 @@ class dipole(lattice):
                       [M51, M52, 0, 0, 1, M56],
                       [0, 0, 0, 0, 0, 1]])
 
-        return torch.tensor(mat,dtype=torch.float32)
+        return torch.tensor(mat,dtype=torch.float64)
 
     def __str__(self):
         '''
@@ -655,7 +655,7 @@ class dipole_wedge(lattice):
                       [0, 0, 0, 0, 1, M56],
                       [0, 0, 0, 0, 0, 1]])
 
-        return torch.tensor(mat,dtype=torch.float32)
+        return torch.tensor(mat,dtype=torch.float64)
 
     def __str__(self):
         '''
@@ -732,7 +732,7 @@ class Beamline:
                         [0, 0, 0, 0, 1, M56],
                         [0, 0, 0, 0, 0, 1]])
 
-            return torch.tensor(mat,dtype=torch.float32)
+            return torch.tensor(mat,dtype=torch.float64)
 
 
         def __str__(self) -> str:
@@ -884,7 +884,7 @@ class Beamline:
         # 1. Vectorized zLine generation using torch.linspace
         # Replacing: while i <= totalLen: zLine.append(i)
         num_points = int(torch.ceil(self.totalLen / interval)) + 1
-        z_line = torch.linspace(0, self.totalLen, num_points, dtype=torch.float32)
+        z_line = torch.linspace(0, self.totalLen, num_points, dtype=torch.float64)
         y_values = torch.zeros_like(z_line)
 
         # 2. Vectorized Field Superposition (End Model)

@@ -361,3 +361,4 @@ denote $x_k=x_{best}$ as the best solution in the simplex
 
 - **step 6:** $k \leftarrow k + 1$
 
+# trust-constr
