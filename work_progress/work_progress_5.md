@@ -18,3 +18,8 @@
 - code has been consolidated into [experiments_utils.py](../experiment/experiments_utils.py)
 - In order for the scatter plot to have better generalizability and representativeness, the trial number has been increased to 1000, taking total time of **23 hours 53 minutes**
 - It turns out that the results from numpy version and pytorch version are very similar, but the reproduced one has some discrepancy with the original paper
+
+# potential next step
+1. Consider hyperparameter tuning for better model stability by cross validation.
+2. Step into scenario B and C with selected algorithms as model benchmark.
+3. Use Koa cluster for parallelization to speed up the experiment.
