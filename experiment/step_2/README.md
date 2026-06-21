@@ -1,0 +1,3 @@
+- swap objective function from MSE to logMSE
+- get N=1000 samples for function $R^{26} \rightarrow R^9$, mapping from current set of current to twiss parameters
+- implement noise model with gaussian setting 

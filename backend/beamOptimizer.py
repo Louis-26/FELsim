@@ -5,7 +5,7 @@ helpful resources
 https://www.youtube.com/watch?v=G0yP_TM-oag
 https://en.wikipedia.org/wiki/Jacobian_matrix_and_determinant
 https://docs.scipy.org/doc/scipy/reference/optimize.html
-gpt"can you xplain the parameters of a constraint paramter in scipy.minimize"
+gpt"can you explain the parameters of a constraint parameter in scipy.minimize"
 """
 
 #  NOTE: nelder-mead method doesn't work if starting search point is zero (if variablesValues = [0,0,0...]
@@ -36,7 +36,7 @@ import time
 
 
 class beamOptimizer:
-    def __init__(self, beamline, matrixVariables):
+    def __init__(self, beamline, matrixVariables, use_log=False, log_epsilon=1e-13):
         """
         Constructor for beamline and particle values to optimize over for given y objectives and x variables
 
@@ -62,6 +62,8 @@ class beamOptimizer:
 
         self.matrixVariables = matrixVariables
         self.beamline = beamline
+        self.use_log=use_log
+        self.log_epsilon=log_epsilon
 
     def _optiSpeed(self, variableVals):
         """
@@ -132,8 +134,10 @@ class beamOptimizer:
         self.plotMSE.append(difference)
         self.plotIterate.append((self.iterationTrack) + 1)
         self.iterationTrack = self.iterationTrack + 1
-
-        return difference
+        if self.use_log:
+            return np.log(difference + self.log_epsilon)
+        else:
+            return difference
 
     def calc(
         self,
