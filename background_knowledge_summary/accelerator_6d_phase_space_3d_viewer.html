@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Accelerator 6D Phase Space 3D Viewer</title>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #111827;
+            color: #f3f4f6;
+            font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        }
+        #canvas-container {
+            width: 100vw;
+            height: 100vh;
+            display: block;
+        }
+        #ui-panel {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            width: 360px;
+            background: rgba(31, 41, 55, 0.85);
+            backdrop-filter: blur(10px);
+            padding: 20px;
+            border-radius: 12px;
+            border: 1px solid #374151;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5);
+            pointer-events: auto;
+            z-index: 10;
+        }
+        h2 {
+            margin-top: 0;
+            font-size: 1.25rem;
+            border-bottom: 1px solid #4B5563;
+            padding-bottom: 10px;
+            color: #60A5FA;
+        }
+        .control-group {
+            margin-bottom: 12px;
+        }
+        .control-group label {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.875rem;
+            margin-bottom: 4px;
+            font-weight: 500;
+        }
+        input[type=range] {
+            width: 100%;
+            cursor: pointer;
+            accent-color: #3B82F6;
+        }
+        .info-box {
+            margin-top: 20px;
+            padding: 12px;
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 8px;
+            font-size: 0.8rem;
+            line-height: 1.5;
+            color: #9CA3AF;
+        }
+        .legend {
+            display: flex;
+            align-items: center;
+            margin-top: 6px;
+            font-size: 0.85rem;
+        }
+        .color-box {
+            width: 12px;
+            height: 12px;
+            border-radius: 2px;
+            margin-right: 8px;
+        }
+        hr {
+            border: 0;
+            height: 1px;
+            background: #4B5563;
+            margin: 15px 0;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="ui-panel">
+        <h2>6D Phase Space Console</h2>
+        
+        <!-- Transverse Coordinates -->
+        <div class="control-group">
+            <label><span>x (Horiz. Position)</span> <span id="val-x">0.0 mm</span></label>
+            <input type="range" id="slider-x" min="-50" max="50" value="25" step="1">
+        </div>
+        
+        <div class="control-group">
+            <label><span>x' (Horiz. Angle dx/ds)</span> <span id="val-xp">0.0 mrad</span></label>
+            <input type="range" id="slider-xp" min="-50" max="50" value="-15" step="1">
+        </div>
+
+        <div class="control-group">
+            <label><span>y (Vert. Position)</span> <span id="val-y">0.0 mm</span></label>
+            <input type="range" id="slider-y" min="-50" max="50" value="0" step="1">
+        </div>
+
+        <div class="control-group">
+            <label><span>y' (Vert. Angle dy/ds)</span> <span id="val-yp">0.0 mrad</span></label>
+            <input type="range" id="slider-yp" min="-50" max="50" value="0" step="1">
+        </div>
+
+        <hr>
+
+        <!-- Longitudinal Coordinates -->
+        <div class="control-group">
+            <label><span>z (Longit. Deviation &Delta;s)</span> <span id="val-z">0.0 mm</span></label>
+            <input type="range" id="slider-z" min="-50" max="50" value="0" step="1">
+        </div>
+
+        <div class="control-group">
+            <label><span>z' (Momentum Dev. &delta;)</span> <span id="val-zp">0.0 %</span></label>
+            <input type="range" id="slider-zp" min="-5" max="5" value="0" step="0.1">
+        </div>
+
+        <div class="info-box">
+            <div style="color: #E5E7EB; margin-bottom: 8px; font-weight: bold;">Legend (Right-Handed Frame):</div>
+            <div class="legend"><div class="color-box" style="background: #3B82F6;"></div> s-axis (Blue): Nominal Beam Direction</div>
+            <div class="legend"><div class="color-box" style="background: #EF4444;"></div> x-axis (Red): Horizontal Transverse</div>
+            <div class="legend"><div class="color-box" style="background: #10B981;"></div> y-axis (Green): Vertical Transverse</div>
+            <div class="legend" style="margin-top: 10px;">
+                <div class="color-box" style="background: #FFFFFF; border-radius: 50%;"></div> White Sphere: Reference Particle (0,0,0)
+            </div>
+            <div class="legend">
+                <div class="color-box" style="background: #F59E0B; border-radius: 50%;"></div> Yellow Sphere: Test Particle
+            </div>
+            <p style="margin-top: 10px; font-style: italic;">Note: The yellow arrow indicates the 3D momentum vector. z' (delta) scales the magnitude (arrow length).</p>
+        </div>
+    </div>
+
+    <div id="canvas-container"></div>
+
+    <!-- Three.js -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        // Init Scene
+        const scene = new THREE.Scene();
+        scene.fog = new THREE.FogExp2(0x111827, 0.002);
+
+        // Camera setup
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(150, 100, -150);
+        camera.lookAt(0, 0, 0);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        document.getElementById('canvas-container').appendChild(renderer.domElement);
+
+        // Grid
+        const gridHelper = new THREE.GridHelper(500, 50, 0x374151, 0x1F2937);
+        gridHelper.position.y = -50;
+        scene.add(gridHelper);
+
+        // Right-Handed Axes: Red=x, Green=y, Blue=s(z)
+        const axesHelper = new THREE.AxesHelper(60);
+        axesHelper.material.linewidth = 3;
+        scene.add(axesHelper);
+
+        // Reference Particle (Origin)
+        const refGeometry = new THREE.SphereGeometry(2.5, 32, 32);
+        const refMaterial = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.8 });
+        const refParticle = new THREE.Mesh(refGeometry, refMaterial);
+        scene.add(refParticle);
+
+        // Test Particle (Yellow)
+        const testGeometry = new THREE.SphereGeometry(3.5, 32, 32);
+        const testMaterial = new THREE.MeshStandardMaterial({ color: 0xF59E0B, metalness: 0.3, roughness: 0.4 });
+        const testParticle = new THREE.Mesh(testGeometry, testMaterial);
+        scene.add(testParticle);
+
+        // Velocity Vector Arrow
+        const dir = new THREE.Vector3(0, 0, 1);
+        const origin = new THREE.Vector3(0, 0, 0);
+        const baseArrowLength = 40;
+        const hex = 0xF59E0B;
+        const arrowHelper = new THREE.ArrowHelper(dir, origin, baseArrowLength, hex, 8, 4);
+        scene.add(arrowHelper);
+
+        // Lighting
+        const ambientLight = new THREE.AmbientLight(0x404040, 2);
+        scene.add(ambientLight);
+        const pointLight = new THREE.PointLight(0xffffff, 1.5, 500);
+        pointLight.position.set(50, 100, 50);
+        scene.add(pointLight);
+
+        // Manual Orbit Controls
+        let isDragging = false;
+        let spherical = new THREE.Spherical().setFromVector3(camera.position);
+
+        document.addEventListener('mousedown', (e) => { 
+            // Prevent dragging if clicking on UI
+            if (e.target.closest('#ui-panel')) return;
+            isDragging = true; 
+        });
+        document.addEventListener('mouseup', () => { isDragging = false; });
+        document.addEventListener('mousemove', (e) => {
+            if (isDragging) {
+                spherical.theta -= e.movementX * 0.01;
+                spherical.phi -= e.movementY * 0.01;
+                spherical.phi = Math.max(0.1, Math.min(Math.PI - 0.1, spherical.phi));
+                camera.position.setFromSpherical(spherical);
+                camera.lookAt(scene.position);
+            }
+        });
+        document.addEventListener('wheel', (e) => {
+            if (e.target.closest('#ui-panel')) return;
+            spherical.radius += e.deltaY * 0.1;
+            spherical.radius = Math.max(20, Math.min(400, spherical.radius));
+            camera.position.setFromSpherical(spherical);
+            camera.lookAt(scene.position);
+        });
+
+        // UI Logic
+        const sliders = {
+            x: document.getElementById('slider-x'),
+            xp: document.getElementById('slider-xp'),
+            y: document.getElementById('slider-y'),
+            yp: document.getElementById('slider-yp'),
+            z: document.getElementById('slider-z'),
+            zp: document.getElementById('slider-zp')
+        };
+        const vals = {
+            x: document.getElementById('val-x'),
+            xp: document.getElementById('val-xp'),
+            y: document.getElementById('val-y'),
+            yp: document.getElementById('val-yp'),
+            z: document.getElementById('val-z'),
+            zp: document.getElementById('val-zp')
+        };
+
+        function updatePhysics() {
+            const vx = parseFloat(sliders.x.value);
+            const vxp = parseFloat(sliders.xp.value);
+            const vy = parseFloat(sliders.y.value);
+            const vyp = parseFloat(sliders.yp.value);
+            const vz = parseFloat(sliders.z.value);
+            const vzp = parseFloat(sliders.zp.value); // Percentage, e.g. -5% to +5%
+
+            // Update UI Labels
+            vals.x.innerText = (vx > 0 ? "+" : "") + vx.toFixed(1) + " mm";
+            vals.xp.innerText = (vxp > 0 ? "+" : "") + vxp.toFixed(1) + " mrad";
+            vals.y.innerText = (vy > 0 ? "+" : "") + vy.toFixed(1) + " mm";
+            vals.yp.innerText = (vyp > 0 ? "+" : "") + vyp.toFixed(1) + " mrad";
+            vals.z.innerText = (vz > 0 ? "+" : "") + vz.toFixed(1) + " mm";
+            vals.zp.innerText = (vzp > 0 ? "+" : "") + vzp.toFixed(1) + " %";
+
+            // 1. Update Test Particle Position (x, y, z)
+            // Z-axis maps to s-axis (longitudinal). Positive z is ahead.
+            testParticle.position.set(vx, vy, vz);
+
+            // 2. Update Velocity/Momentum Vector
+            // x' = dx/ds, y' = dy/ds.
+            const slopeX = vxp * 0.05; 
+            const slopeY = vyp * 0.05;
+            
+            // Nominal longitudinal momentum is 1. z' (delta) alters the magnitude.
+            // Vector direction: (slopeX, slopeY, 1)
+            const velocityVector = new THREE.Vector3(slopeX, slopeY, 1).normalize();
+            
+            // Arrow Length scales with momentum deviation (z')
+            // Using a visual multiplier so the length change is easily observable.
+            const momentumScale = 1 + (vzp / 10); 
+            const arrowLength = baseArrowLength * momentumScale;
+
+            arrowHelper.position.copy(testParticle.position);
+            arrowHelper.setDirection(velocityVector);
+            arrowHelper.setLength(Math.max(5, arrowLength), 8, 4);
+
+            updateTrajectoryLine(testParticle.position, velocityVector);
+        }
+
+        let trajectoryLine;
+        function updateTrajectoryLine(startPos, direction) {
+            if (trajectoryLine) scene.remove(trajectoryLine);
+            
+            const points = [];
+            points.push(startPos.clone());
+            // Extrapolate forward
+            const endPos = startPos.clone().add(direction.clone().multiplyScalar(200));
+            points.push(endPos);
+
+            const geometry = new THREE.BufferGeometry().setFromPoints(points);
+            const material = new THREE.LineDashedMaterial({
+                color: 0xF59E0B,
+                linewidth: 1,
+                scale: 1,
+                dashSize: 3,
+                gapSize: 2,
+                transparent: true,
+                opacity: 0.5
+            });
+            trajectoryLine = new THREE.Line(geometry, material);
+            trajectoryLine.computeLineDistances();
+            scene.add(trajectoryLine);
+        }
+
+        // Event Listeners
+        Object.values(sliders).forEach(slider => {
+            slider.addEventListener('input', updatePhysics);
+        });
+
+        // Animation Loop
+        function animate() {
+            requestAnimationFrame(animate);
+            // Simulating relative forward motion by moving the grid backward
+            gridHelper.position.z -= 0.5;
+            if(gridHelper.position.z <= -50) gridHelper.position.z = 0;
+            
+            renderer.render(scene, camera);
+        }
+
+        // Initialize
+        updatePhysics();
+        animate();
+
+        // Handle Resize
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,1094 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Diagnostic Chicane (DC) 138-Lattice Simulator & AI Assistant</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #0b1120; color: #f8fafc; font-family: ui-sans-serif, system-ui, sans-serif; user-select: none; }
+        #canvas-container { width: 100vw; height: 100vh; position: absolute; top: 0; left: 0; z-index: 1; }
+        
+        /* UI Panels */
+        .panel {
+            position: absolute; background: rgba(15, 23, 42, 0.9); backdrop-filter: blur(12px);
+            border: 1px solid #334155; z-index: 10; padding: 15px;
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.8); transition: transform 0.3s ease;
+        }
+        
+        /* Left Panel */
+        #left-panel { top: 20px; left: 20px; width: 380px; border-radius: 10px; bottom: 100px; display: flex; flex-direction: column;}
+        #left-panel.collapsed { transform: translateX(-120%); }
+        
+        /* Right Panel */
+        #right-panel { top: 20px; right: 20px; width: 340px; bottom: 100px; display: flex; flex-direction: column; border-radius: 10px; }
+        #right-panel.collapsed { transform: translateX(120%); }
+
+        /* Bottom Panel - Timeline */
+        #bottom-panel { bottom: 20px; left: 50%; transform: translateX(-50%); width: 60%; height: 60px; display: flex; align-items: center; justify-content: space-between; border-radius: 10px; z-index: 20; }
+        .timeline-container { flex-grow: 1; margin: 0 20px; display: flex; flex-direction: column; }
+        .timeline-labels { display: flex; justify-content: space-between; font-size: 0.85rem; color: #94a3b8; margin-bottom: 4px; }
+        
+        /* Panel Toggles */
+        .toggle-btn {
+            position: absolute; top: 20px; background: #1e293b; color: #94a3b8; border: 1px solid #334155;
+            padding: 5px 10px; border-radius: 6px; cursor: pointer; z-index: 15; font-size: 0.8rem;
+        }
+        .toggle-btn:hover { background: #334155; color: #fff; }
+        #left-toggle { left: 20px; }
+        #right-toggle { right: 20px; }
+
+        h2 { margin: 0 0 10px 0; font-size: 1.1rem; color: #38bdf8; border-bottom: 1px solid #334155; padding-bottom: 8px;}
+        
+        /* Lattice List */
+        #lattice-list { flex-grow: 1; overflow-y: auto; padding-right: 5px; margin-top: 10px;}
+        #lattice-list::-webkit-scrollbar { width: 6px; }
+        #lattice-list::-webkit-scrollbar-track { background: #0f172a; }
+        #lattice-list::-webkit-scrollbar-thumb { background: #475569; border-radius: 3px; }
+
+        .element-row { margin-bottom: 8px; padding: 8px; background: rgba(0,0,0,0.3); border-radius: 6px; border-left: 3px solid #475569; position: relative; }
+        .element-row.drift { border-left-color: #a855f7; }
+        .element-row.qpf { border-left-color: #ef4444; }
+        .element-row.qpd { border-left-color: #3b82f6; }
+        .element-row.dipole { border-left-color: #10b981; }
+        
+        .el-header { display: flex; justify-content: space-between; align-items: center; font-size: 0.75rem; color: #94a3b8; margin-bottom: 4px;}
+        .el-name { font-weight: bold; color: #e2e8f0; font-size: 0.85rem;}
+        
+        .ai-explain-btn {
+            background: none; border: none; cursor: pointer; font-size: 1rem; 
+            padding: 0 5px; transition: transform 0.2s;
+        }
+        .ai-explain-btn:hover { transform: scale(1.2); }
+
+        input[type=range] { width: 100%; cursor: pointer; accent-color: #38bdf8; margin-top: 5px;}
+        .slider-qpf { accent-color: #ef4444; } 
+        .slider-qpd { accent-color: #3b82f6; } 
+
+        .btn { background: #0ea5e9; color: white; border: none; padding: 10px 16px; border-radius: 6px; font-weight: bold; cursor: pointer; transition: 0.2s; display: flex; justify-content: center; align-items: center; gap: 8px;}
+        .btn:hover { background: #0284c7; }
+        .btn-ai { background: linear-gradient(135deg, #8b5cf6, #d946ef); width: 100%; margin-top: 10px;}
+        .btn-ai:hover { background: linear-gradient(135deg, #7c3aed, #c026d3); }
+
+        /* 2D Diagnostic Screen */
+        #diagnostic-screen { width: 100%; height: 160px; background: #000; border: 1px solid #475569; border-radius: 6px; margin-top: 5px; position: relative; flex-shrink: 0;}
+        #screen-canvas { width: 100%; height: 100%; }
+        
+        /* Twiss Table */
+        .twiss-container { flex-grow: 1; overflow-y: auto; margin-top: 10px; background: rgba(0,0,0,0.5); border-radius: 6px; padding: 10px; border: 1px solid #334155;}
+        table { width: 100%; border-collapse: collapse; font-size: 0.75rem; text-align: right;}
+        th { color: #facc15; padding-bottom: 5px; border-bottom: 1px solid #475569; font-weight: bold;}
+        td { padding: 4px 0; color: #e2e8f0; border-bottom: 1px solid #1e293b;}
+        td:first-child, th:first-child { text-align: left; font-weight: bold; color: #38bdf8;}
+
+        /* Setup Controls */
+        .setup-group { margin-bottom: 8px; font-size: 0.75rem; color: #cbd5e1; display: grid; grid-template-columns: 1fr 1fr; gap: 10px;}
+        .setup-row { display: flex; flex-direction: column; }
+        .setup-row span { margin-bottom: 2px; }
+
+        /* Legends */
+        .legend-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; margin-bottom: 5px; }
+        .legend-row { display: flex; align-items: center; font-size: 0.7rem; color: #94a3b8; }
+        .color-box { width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; }
+        .cb-qpf { background-color: #ef4444; }
+        .cb-qpd { background-color: #3b82f6; }
+        .cb-dip { background-color: #10b981; }
+        .cb-ip { background-color: #facc15; }
+        .cb-drift { background-color: #a855f7; }
+
+        /* AI Modal */
+        #ai-modal {
+            display: none; position: fixed; z-index: 100; left: 0; top: 0; width: 100vw; height: 100vh;
+            background-color: rgba(0,0,0,0.6); backdrop-filter: blur(4px);
+            align-items: center; justify-content: center;
+        }
+        .modal-content {
+            background: #1e293b; border: 1px solid #8b5cf6; border-radius: 12px; width: 450px; max-width: 90%;
+            padding: 20px; box-shadow: 0 20px 40px rgba(0,0,0,0.5); color: #f8fafc;
+            position: relative; line-height: 1.6;
+        }
+        .modal-header { font-size: 1.2rem; font-weight: bold; color: #d946ef; margin-bottom: 10px; display: flex; align-items: center; gap: 8px;}
+        .close-btn { position: absolute; right: 15px; top: 15px; background: none; border: none; color: #94a3b8; font-size: 1.5rem; cursor: pointer; }
+        .close-btn:hover { color: #fff; }
+        .loader {
+            border: 3px solid rgba(255,255,255,0.1); border-top: 3px solid #d946ef;
+            border-radius: 50%; width: 24px; height: 24px; animation: spin 1s linear infinite;
+            display: inline-block; margin-right: 10px;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .markdown-body strong { color: #facc15; }
+        .markdown-body p { margin-bottom: 10px; }
+    </style>
+</head>
+<body>
+
+    <!-- Panel Toggles -->
+    <button class="toggle-btn" id="left-toggle" onclick="togglePanel('left')">Hide Left</button>
+    <button class="toggle-btn" id="right-toggle" onclick="togglePanel('right')">Hide Right</button>
+
+    <!-- Left Panel: Dynamics & Diagnostics -->
+    <div class="panel" id="left-panel">
+        <h2 style="margin-top: 20px;">Beam Initialization</h2>
+        
+        <!-- 电子束 3D 初始分布控制器 -->
+        <div class="setup-group">
+            <div class="setup-row">
+                <span id="lbl-n">Electrons (N): 80</span>
+                <input type="range" id="param-n" min="10" max="500" value="80" step="10">
+            </div>
+            <div class="setup-row">
+                <span id="lbl-sd">Energy Sprd (δ): 2.0</span>
+                <input type="range" id="param-sd" min="0.0" max="5.0" value="2.0" step="0.1">
+            </div>
+            <div class="setup-row">
+                <span id="lbl-sx">X Spread (Std): 1.5</span>
+                <input type="range" id="param-sx" min="0.1" max="5.0" value="1.5" step="0.1">
+            </div>
+            <div class="setup-row">
+                <span id="lbl-sy">Y Spread (Std): 1.5</span>
+                <input type="range" id="param-sy" min="0.1" max="5.0" value="1.5" step="0.1">
+            </div>
+        </div>
+
+        <h2 style="margin-top: 5px;">Live Diagnostics</h2>
+        <div class="legend-grid">
+            <div class="legend-row"><div class="color-box cb-qpf"></div><span>QPF</span></div>
+            <div class="legend-row"><div class="color-box cb-qpd"></div><span>QPD</span></div>
+            <div class="legend-row"><div class="color-box cb-dip"></div><span>Dipole</span></div>
+            <div class="legend-row"><div class="color-box cb-drift"></div><span>Drift</span></div>
+        </div>
+        
+        <!-- 明确的坐标系图例 -->
+        <div style="font-size: 0.8rem; color:#e2e8f0; margin-bottom: 6px; font-weight: bold; border-top: 1px solid #334155; padding-top: 8px;">Coordinate System:</div>
+        <div class="legend-grid">
+            <div class="legend-row"><div class="color-box" style="background-color: #ef4444;"></div><span>X-Axis (Red)</span></div>
+            <div class="legend-row"><div class="color-box" style="background-color: #22c55e;"></div><span>Y-Axis (Green)</span></div>
+            <div class="legend-row"><div class="color-box" style="background-color: #3b82f6;"></div><span>Z-Axis (Blue)</span></div>
+            <div class="legend-row"><div class="color-box" style="background-color: #ffffff; border-radius: 50%;"></div><span>Origin (0,0,0)</span></div>
+        </div>
+
+        <div id="diagnostic-screen">
+            <canvas id="screen-canvas"></canvas>
+        </div>
+
+        <!-- 恢复丢失的 Visual Scale 滑块 -->
+        <div style="margin-top: 10px;">
+            <label style="display:flex; justify-content:space-between; font-size:0.75rem; color:#cbd5e1;">
+                <span>Transverse Visual Multiplier</span> <span id="val-scale">15x</span>
+            </label>
+            <input type="range" id="visual-scale" min="1" max="100" value="15">
+        </div>
+        
+        <!-- 实时 Twiss 参数监测面板 -->
+        <div class="twiss-container">
+            <div style="color: #38bdf8; font-weight: bold; margin-bottom: 5px; font-size: 0.85rem;">Twiss Parameters @ Current Z</div>
+            <table>
+                <thead>
+                    <tr><th>Dim</th><th>Std</th><th>α</th><th>β (m)</th><th>γ</th><th>ε</th><th>φ (deg)</th><th>Env</th><th>Disp</th></tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>X</td><td id="tw-std-x">0</td><td id="tw-a-x">0</td><td id="tw-b-x">0</td><td id="tw-g-x">0</td><td id="tw-e-x">0</td><td id="tw-phi-x">0</td><td id="tw-env-x">0</td><td id="tw-d-x">0</td>
+                    </tr>
+                    <tr>
+                        <td>Y</td><td id="tw-std-y">0</td><td id="tw-a-y">0</td><td id="tw-b-y">0</td><td id="tw-g-y">0</td><td id="tw-e-y">0</td><td id="tw-phi-y">0</td><td id="tw-env-y">0</td><td id="tw-d-y">0</td>
+                    </tr>
+                </tbody>
+            </table>
+            <div style="font-size: 0.65rem; color: #64748b; margin-top: 5px; text-align: left;">
+                *Env (Envelope) = sqrt(β*ε) * 1000 <br>
+                *Disp = Cov(u, δ)/Var(δ)
+            </div>
+        </div>
+
+        <button class="btn btn-ai" id="btn-ai-diag">✨ Ask AI for Tuning Diagnostics</button>
+    </div>
+
+    <!-- Right Panel: 138 Element Lattice Explorer -->
+    <div class="panel" id="right-panel">
+        <h2 style="color: #facc15; margin-top: 20px;">138-Element Lattice Browser</h2>
+        <div style="font-size: 0.75rem; color:#94a3b8; margin-bottom: 10px;">
+            Reconstructed from terminal output. Adjust Quads to deform the 3D envelope. Click ✨ to ask AI.
+        </div>
+        <div id="lattice-list">
+            <!-- Populated by JS -->
+        </div>
+    </div>
+
+    <!-- Bottom Panel: Timeline & Fire Controls -->
+    <div class="panel" id="bottom-panel">
+        <button class="btn" id="btn-fire" style="padding: 8px 15px; font-size: 0.9rem;">
+            🔥 Fire Beam
+        </button>
+        
+        <div class="timeline-container">
+            <div class="timeline-labels">
+                <span>Start (Z=0)</span>
+                <span id="current-z-label" style="color: #facc15; font-weight: bold; font-size: 0.9rem;">Monitor Z: 0.00 m</span>
+                <span id="end-z-label">End</span>
+            </div>
+            <!-- Global Scrubbing Timeline -->
+            <input type="range" id="z-timeline" min="0" max="100" value="0" step="0.01">
+        </div>
+        
+        <label style="display:flex; align-items:center; font-size:0.8rem; color:#cbd5e1; cursor:pointer; width: 140px;">
+            <input type="checkbox" id="cam-follow" checked style="margin-right:8px; width:auto;"> Camera Follows
+        </label>
+    </div>
+
+    <!-- 3D Canvas -->
+    <div id="canvas-container"></div>
+
+    <!-- AI Response Modal -->
+    <div id="ai-modal">
+        <div class="modal-content">
+            <button class="close-btn" onclick="closeModal()">×</button>
+            <div class="modal-header" id="ai-modal-header">✨ AI Physicist Assistant</div>
+            <div id="ai-modal-body" class="markdown-body" style="font-size: 0.95rem; color: #cbd5e1; max-height: 400px; overflow-y: auto;">
+                <!-- AI Content populates here -->
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        // ==========================================
+        // GEMINI AI INTEGRATION (with Exponential Backoff)
+        // ==========================================
+        const apiKey = ""; 
+
+        async function fetchGemini(prompt, systemPrompt = "You are a helpful expert.") {
+            const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+            const payload = {
+                contents: [{ parts: [{ text: prompt }] }],
+                systemInstruction: { parts: [{ text: systemPrompt }] }
+            };
+
+            const retries = 5;
+            const delays = [1000, 2000, 4000, 8000, 16000];
+
+            for (let i = 0; i < retries; i++) {
+                try {
+                    const response = await fetch(url, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+                    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                    const result = await response.json();
+                    return result.candidates?.[0]?.content?.parts?.[0]?.text || "No response received.";
+                } catch (error) {
+                    if (i === retries - 1) return `Error connecting to AI: ${error.message}`;
+                    await new Promise(r => setTimeout(r, delays[i]));
+                }
+            }
+        }
+
+        function showModal(title, content) {
+            document.getElementById('ai-modal-header').innerHTML = `✨ ${title}`;
+            document.getElementById('ai-modal-body').innerHTML = content;
+            document.getElementById('ai-modal').style.display = 'flex';
+        }
+
+        function closeModal() {
+            document.getElementById('ai-modal').style.display = 'none';
+        }
+
+        function togglePanel(side) {
+            const panel = document.getElementById(`${side}-panel`);
+            const btn = document.getElementById(`${side}-toggle`);
+            panel.classList.toggle('collapsed');
+            let isHidden = panel.classList.contains('collapsed');
+            let sideName = side === 'left' ? 'Left' : 'Right';
+            btn.innerText = isHidden ? `Show ${sideName}` : `Hide ${sideName}`;
+        }
+
+        // ==========================================
+        // 1. DATA STRUCTURES & 138-ELEMENT GENERATION
+        // ==========================================
+        const LATTICE_TOTAL = 138;
+        const beamline = [];
+        const controllableQuads = []; 
+        let totalLength = 0;
+
+        function addElement(type, name, length, props = {}) {
+            const el = { id: beamline.length, type, name, length, z_start: totalLength, z_end: totalLength + length, ...props };
+            totalLength += length;
+            beamline.push(el);
+            if (type === 'qpf' || type === 'qpd') controllableQuads.push(el);
+            return el;
+        }
+
+        // 解析 138 个物理元件位置
+        const rawTerminal = `
+        el   0  driftLattice          s_end=0.35878 m
+        el   1  qpfLattice            s_end=0.44768 m
+        el   2  driftLattice          s_end=0.64453 m
+        el   3  qpdLattice            s_end=0.73342 m
+        el   4  driftLattice          s_end=1.63286 m
+        el   5  driftLattice          s_end=1.69792 m
+        el   6  dipole_wedge          s_end=1.70792 m
+        el   7  dipole                s_end=1.79682 m
+        el   8  dipole_wedge          s_end=1.80682 m
+        el   9  driftLattice          s_end=2.03304 m
+        el  10  qpfLattice            s_end=2.12194 m
+        el  11  driftLattice          s_end=2.34816 m
+        el  12  dipole_wedge          s_end=2.35816 m
+        el  13  dipole                s_end=2.44706 m
+        el  14  dipole_wedge          s_end=2.45706 m
+        el  15  driftLattice          s_end=2.73535 m
+        el  16  qpdLattice            s_end=2.82425 m
+        el  17  driftLattice          s_end=2.86743 m
+        el  18  qpfLattice            s_end=2.95633 m
+        el  19  driftLattice          s_end=2.99951 m
+        el  20  qpdLattice            s_end=3.08841 m
+        el  21  driftLattice          s_end=3.21879 m
+        el  22  driftLattice          s_end=3.28791 m
+        el  23  dipole_wedge          s_end=3.29791 m
+        el  24  dipole                s_end=3.33855 m
+        el  25  dipole_wedge          s_end=3.34855 m
+        el  26  driftLattice          s_end=3.55448 m
+        el  27  qpfLattice            s_end=3.64338 m
+        el  28  driftLattice          s_end=3.84931 m
+        el  29  dipole_wedge          s_end=3.85931 m
+        el  30  dipole                s_end=3.89995 m
+        el  31  dipole_wedge          s_end=3.90995 m
+        el  32  driftLattice          s_end=4.15187 m
+        el  33  qpdLattice            s_end=4.24077 m
+        el  34  driftLattice          s_end=4.29157 m
+        el  35  qpfLattice            s_end=4.38047 m
+        el  36  driftLattice          s_end=4.43127 m
+        el  37  qpdLattice            s_end=4.52017 m
+        el  38  driftLattice          s_end=4.93513 m
+        el  39  qpdLattice            s_end=5.02403 m
+        el  40  driftLattice          s_end=5.07483 m
+        el  41  qpfLattice            s_end=5.16373 m
+        el  42  driftLattice          s_end=5.21453 m
+        el  43  qpdLattice            s_end=5.30343 m
+        el  44  driftLattice          s_end=5.49850 m
+        el  45  driftLattice          s_end=5.56444 m
+        el  46  dipole_wedge          s_end=5.57444 m
+        el  47  dipole                s_end=5.61508 m
+        el  48  dipole_wedge          s_end=5.62508 m
+        el  49  driftLattice          s_end=5.83098 m
+        el  50  qpfLattice            s_end=5.91988 m
+        el  51  driftLattice          s_end=6.12578 m
+        el  52  dipole_wedge          s_end=6.13578 m
+        el  53  dipole                s_end=6.17642 m
+        el  54  dipole_wedge          s_end=6.18642 m
+        el  55  driftLattice          s_end=6.36946 m
+        el  56  qpdLattice            s_end=6.45836 m
+        el  57  driftLattice          s_end=6.55775 m
+        el  58  qpfLattice            s_end=6.64665 m
+        el  59  driftLattice          s_end=7.11013 m
+        el  60  driftLattice          s_end=7.32562 m
+        el  61  qpfLattice            s_end=7.41452 m
+        el  62  driftLattice          s_end=7.46992 m
+        el  63  qpdLattice            s_end=7.55882 m
+        el  64  driftLattice          s_end=7.77307 m
+        el  65  driftLattice          s_end=7.84092 m
+        el  66  dipole_wedge          s_end=7.85092 m
+        el  67  dipole                s_end=7.89156 m
+        el  68  dipole_wedge          s_end=7.90156 m
+        el  69  driftLattice          s_end=8.10749 m
+        el  70  qpfLattice            s_end=8.19639 m
+        el  71  driftLattice          s_end=8.40232 m
+        el  72  dipole_wedge          s_end=8.41232 m
+        el  73  dipole                s_end=8.45296 m
+        el  74  dipole_wedge          s_end=8.46296 m
+        el  75  driftLattice          s_end=8.60769 m
+        el  76  qpdLattice            s_end=8.69659 m
+        el  77  driftLattice          s_end=8.73278 m
+        el  78  qpfLattice            s_end=8.82168 m
+        el  79  driftLattice          s_end=8.85788 m
+        el  80  qpdLattice            s_end=8.94678 m
+        el  81  driftLattice          s_end=9.22237 m
+        el  82  driftLattice          s_end=9.29377 m
+        el  83  dipole_wedge          s_end=9.30377 m
+        el  84  dipole                s_end=9.39267 m
+        el  85  dipole_wedge          s_end=9.40267 m
+        el  86  driftLattice          s_end=9.62889 m
+        el  87  qpfLattice            s_end=9.71779 m
+        el  88  driftLattice          s_end=9.94401 m
+        el  89  dipole_wedge          s_end=9.95401 m
+        el  90  dipole                s_end=10.04291 m
+        el  91  dipole_wedge          s_end=10.05291 m
+        el  92  driftLattice          s_end=10.21208 m
+        el  93  qpdLattice            s_end=10.30098 m
+        el  94  driftLattice          s_end=10.60921 m
+        el  95  qpfLattice            s_end=10.69811 m
+        el  96  driftLattice          s_end=10.73621 m
+        el  97  qpdLattice            s_end=10.82511 m
+        el  98  driftLattice          s_end=11.00542 m
+        el  99  driftLattice          s_end=11.09941 m
+        el 100  dipole_wedge          s_end=11.10941 m
+        el 101  dipole                s_end=11.14680 m
+        el 102  dipole_wedge          s_end=11.15680 m
+        el 103  driftLattice          s_end=11.46596 m
+        el 104  dipole_wedge          s_end=11.47596 m
+        el 105  dipole                s_end=11.51596 m
+        el 106  dipole_wedge          s_end=11.52596 m
+        el 107  driftLattice          s_end=11.61138 m
+        el 108  driftLattice          s_end=11.69680 m
+        el 109  dipole_wedge          s_end=11.70680 m
+        el 110  dipole                s_end=11.74419 m
+        el 111  dipole_wedge          s_end=11.75419 m
+        el 112  driftLattice          s_end=12.06335 m
+        el 113  dipole_wedge          s_end=12.07335 m
+        el 114  dipole                s_end=12.11074 m
+        el 115  dipole_wedge          s_end=12.12074 m
+        el 116  driftLattice          s_end=12.32248 m
+        el 117  driftLattice          s_end=12.39158 m
+        el 118  driftLattice          s_end=12.93208 m
+        el 119  driftLattice          s_end=13.47258 m
+        el 120  driftLattice          s_end=13.54168 m
+        el 121  driftLattice          s_end=13.74405 m
+        el 122  dipole_wedge          s_end=13.75405 m
+        el 123  dipole                s_end=13.79144 m
+        el 124  dipole_wedge          s_end=13.80144 m
+        el 125  driftLattice          s_end=14.11060 m
+        el 126  dipole_wedge          s_end=14.12060 m
+        el 127  dipole                s_end=14.15799 m
+        el 128  dipole_wedge          s_end=14.16799 m
+        el 129  driftLattice          s_end=14.25341 m
+        el 130  driftLattice          s_end=14.33883 m
+        el 131  dipole_wedge          s_end=14.34883 m
+        el 132  dipole                s_end=14.38622 m
+        el 133  dipole_wedge          s_end=14.39622 m
+        el 134  driftLattice          s_end=14.70538 m
+        el 135  dipole_wedge          s_end=14.71538 m
+        el 136  dipole                s_end=14.75277 m
+        el 137  dipole_wedge          s_end=14.76277 m
+        `;
+
+        let prevZ = 0;
+        rawTerminal.trim().split('\n').forEach((line, index) => {
+            if(!line.includes('s_end=')) return;
+            let parts = line.trim().split(/\s+/);
+            let id = parts[1];
+            let typeStr = parts[2];
+            let zStr = parts[3].split('=')[1];
+            let endZ = parseFloat(zStr);
+            let L = endZ - prevZ;
+
+            let type = 'drift';
+            if(typeStr === 'qpfLattice') type = 'qpf';
+            if(typeStr === 'qpdLattice') type = 'qpd';
+            if(typeStr === 'dipole_wedge') type = 'dipole_wedge';
+            if(typeStr === 'dipole') type = 'dipole';
+            
+            let props = {};
+            if(type === 'qpf') props.k = 1.2;
+            if(type === 'qpd') props.k = 1.2; 
+            if(type.includes('dipole')) props.rho = 1.5;
+            if(type === 'dipole_wedge') props.wedge = 11.25;
+
+            if (id == 75) type = 'ip';
+
+            addElement(type, typeStr + '_' + id, Math.max(L, 0.0001), props);
+            prevZ = endZ;
+        });
+
+        document.getElementById('z-timeline').max = totalLength;
+        document.getElementById('end-z-label').innerText = `End: ${totalLength.toFixed(2)}m`;
+
+
+        // ==========================================
+        // 2. PHYSICS ENGINE (6x6) & TWISS CALCULATION
+        // ==========================================
+        function mult6x1(M, v) {
+            let res = [0,0,0,0,0,0];
+            for(let i=0; i<6; i++) {
+                for(let j=0; j<6; j++) res[i] += M[i][j] * v[j];
+            }
+            return res;
+        }
+
+        function getTransferMatrix(el) {
+            let L = el.length;
+            let M = [[1,0,0,0,0,0],[0,1,0,0,0,0],[0,0,1,0,0,0],[0,0,0,1,0,0],[0,0,0,0,1,0],[0,0,0,0,0,1]];
+
+            if (el.type === 'drift' || el.type === 'ip') {
+                M[0][1] = L; M[2][3] = L;
+            } 
+            else if (el.type === 'qpf' || el.type === 'qpd') {
+                let K = Math.abs(el.k);
+                if (K < 1e-6) { M[0][1] = L; M[2][3] = L; return M; } 
+                let sqrtK = Math.sqrt(K);
+                let th = sqrtK * L;
+                let C = Math.cos(th), S = Math.sin(th), Ch = Math.cosh(th), Sh = Math.sinh(th);
+
+                if (el.type === 'qpf') { // 水平聚焦
+                    M[0][0] = C; M[0][1] = S/sqrtK; M[1][0] = -sqrtK*S; M[1][1] = C;
+                    M[2][2] = Ch; M[2][3] = Sh/sqrtK; M[3][2] = sqrtK*Sh; M[3][3] = Ch;
+                } else { // 水平散焦
+                    M[0][0] = Ch; M[0][1] = Sh/sqrtK; M[1][0] = sqrtK*Sh; M[1][1] = Ch;
+                    M[2][2] = C; M[2][3] = S/sqrtK; M[3][2] = -sqrtK*S; M[3][3] = C;
+                }
+            }
+            else if (el.type === 'dipole' || el.type === 'dipole_wedge') {
+                let rho = el.rho, th = L / rho, C = Math.cos(th), S = Math.sin(th);
+                M[0][0] = C; M[0][1] = rho*S; M[0][5] = rho*(1-C); 
+                M[1][0] = -S/rho; M[1][1] = C; M[1][5] = S;
+                M[2][3] = L;
+
+                if (el.type === 'dipole_wedge') {
+                    let Tx = Math.tan(el.wedge * Math.PI / 180);
+                    M[3][2] = -Tx / Math.abs(rho); 
+                }
+            }
+            return M;
+        }
+
+        // ==========================================
+        // ✨ JavaScript 版核心 Twiss 参数协方差分析器
+        // ==========================================
+        function computeTwissLive(particlesArray) {
+            let N = particlesArray.length;
+            if (N < 2) return null;
+
+            // 1. 计算均值 (Mean)
+            let mean = [0,0,0,0,0,0];
+            for(let i=0; i<N; i++) {
+                for(let j=0; j<6; j++) mean[j] += particlesArray[i][j];
+            }
+            for(let j=0; j<6; j++) mean[j] /= N;
+
+            // 2. 计算协方差矩阵 (Covariance Matrix)
+            let cov = Array(6).fill(0).map(()=>Array(6).fill(0));
+            for(let i=0; i<N; i++) {
+                for(let r=0; r<6; r++) {
+                    for(let c=0; c<6; c++) {
+                        cov[r][c] += (particlesArray[i][r] - mean[r]) * (particlesArray[i][c] - mean[c]);
+                    }
+                }
+            }
+            for(let r=0; r<6; r++) {
+                for(let c=0; c<6; c++) cov[r][c] /= (N - 1);
+            }
+
+            let var_delta = cov[5][5] || 1e-15;
+
+            // 3. 计算各个平面的色散 (Dispersion) 与 Twiss
+            function getPlaneTwiss(idx_pos, idx_prime) {
+                let D = cov[idx_pos][5] / var_delta;
+                let Dp = cov[idx_prime][5] / var_delta;
+                
+                // 色散修正后的方差与协方差 (Dispersion correction)
+                let var_pos = cov[idx_pos][idx_pos] - D * D * var_delta;
+                let var_prime = cov[idx_prime][idx_prime] - Dp * Dp * var_delta;
+                let cov_mix = cov[idx_pos][idx_prime] - D * Dp * var_delta;
+
+                let eps = Math.sqrt(Math.max(var_pos * var_prime - cov_mix * cov_mix, 1e-15));
+                let alpha = -cov_mix / eps;
+                let beta = var_pos / eps;
+                let gamma = var_prime / eps;
+                
+                // 相位计算 (Phase Advance)
+                let phi = 0.5 * Math.atan2(2 * alpha, gamma - beta) * (180 / Math.PI);
+                let env = Math.sqrt(eps * beta) * 1000; // 包络 (Envelope in mm)
+                let std = Math.sqrt(cov[idx_pos][idx_pos]); // 标准差
+
+                return { eps, alpha, beta, gamma, D, phi, env, std };
+            }
+
+            return { x: getPlaneTwiss(0, 1), y: getPlaneTwiss(2, 3) };
+        }
+
+        // ==========================================
+        // 3. UI GENERATION & CONTROLS
+        // ==========================================
+        const latticeListDiv = document.getElementById('lattice-list');
+        
+        beamline.forEach((el) => {
+            let div = document.createElement('div');
+            let rowClass = 'element-row';
+            if(el.type === 'drift' || el.type === 'ip') rowClass += ' drift';
+            if(el.type === 'qpf') rowClass += ' qpf';
+            if(el.type === 'qpd') rowClass += ' qpd';
+            if(el.type.includes('dipole')) rowClass += ' dipole';
+            
+            div.className = rowClass;
+            
+            let aiBtnHtml = (el.type !== 'drift' && el.type !== 'ip') 
+                ? `<button class="ai-explain-btn" onclick="askAIAboutElement(${el.id})">✨ Ask AI</button>` 
+                : '';
+
+            let html = `
+                <div class="el-header">
+                    <span class="el-name">[#${el.id}] ${el.name}</span>
+                    <div style="display:flex; align-items:center;">
+                        <span>Len: ${el.length.toFixed(3)}m</span>
+                        ${aiBtnHtml}
+                    </div>
+                </div>
+            `;
+
+            if (el.type === 'qpf' || el.type === 'qpd') {
+                let qClass = el.type === 'qpf' ? 'slider-qpf' : 'slider-qpd';
+                html += `
+                    <div style="display:flex; justify-content:space-between; font-size:0.75rem; margin-top:6px; color:#cbd5e1;">
+                        <span>Strength (k)</span> <span id="val-${el.id}">${el.k.toFixed(2)}</span>
+                    </div>
+                    <input type="range" class="${qClass}" min="0" max="5" step="0.05" value="${el.k}" data-id="${el.id}">
+                `;
+            }
+            
+            div.innerHTML = html;
+            latticeListDiv.appendChild(div);
+
+            let slider = div.querySelector('input');
+            if(slider) {
+                slider.addEventListener('input', (e) => {
+                    let val = parseFloat(e.target.value);
+                    document.getElementById(`val-${el.id}`).innerText = val.toFixed(2);
+                    el.k = val;
+                    recalculateGlobalTracks(); 
+                });
+            }
+        });
+
+        async function askAIAboutElement(elId) {
+            const el = beamline[elId]; 
+            const prompt = `Explain the physics and purpose of this specific accelerator element in 2-3 concise, educational sentences: 
+            Type=${el.type.toUpperCase()}, Name=${el.name}, Length=${el.length.toFixed(4)}m. Explain how it transforms the electron beam matrix. Please respond in English.`;
+            
+            showModal(`Explaining ${el.name}...`, `<div class="loader"></div> Requesting AI Physicist...`);
+            const response = await fetchGemini(prompt, "You are a senior accelerator physics expert explaining components to a student. Always respond in English.");
+            const formattedResp = response.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+            document.getElementById('ai-modal-body').innerHTML = formattedResp;
+        }
+
+        document.getElementById('btn-ai-diag').addEventListener('click', async () => {
+            let currentZ = parseFloat(document.getElementById('z-timeline').value).toFixed(2);
+            let tx = document.getElementById('tw-e-x').innerText; // eps_x
+            let ty = document.getElementById('tw-e-y').innerText; // eps_y
+            let bx = document.getElementById('tw-b-x').innerText; // beta_x
+            let ax = document.getElementById('tw-a-x').innerText; // alpha_x
+
+            const prompt = `I am tuning the Diagnostic Chicane (DC) and beamline. 
+            Currently, at beamline Z = ${currentZ} m, the Twiss parameters are:
+            Alpha X = ${ax}
+            Beta X = ${bx} m
+            Eps X = ${tx}
+            Eps Y = ${ty}
+            
+            Act as Niels, my mentor and a veteran accelerator physicist. Write a short, professional, encouraging diagnostic evaluation of this beam profile. 
+            Suggest general rules of thumb on tuning upstream Quads (QPF/QPD) to achieve a waist. Please respond in English.`;
+
+            showModal("✨ Diagnostics Request", `<div class="loader"></div> Sending phase space data to Niels (AI)...`);
+            const response = await fetchGemini(prompt, "You are Niels, a veteran accelerator physicist mentoring a student named 26号新秀. You analyze Twiss parameters and give practical tuning advice. Always respond in English.");
+            const formattedResp = response.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/\n/g, '<br>');
+            document.getElementById('ai-modal-body').innerHTML = formattedResp;
+        });
+
+        // ==========================================
+        // 4. THREE.JS SCENE SETUP
+        // ==========================================
+        const scene = new THREE.Scene();
+        scene.fog = new THREE.FogExp2(0x0b1120, 0.001);
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 1, 3000);
+        
+        const SCALE_Z = 15;   
+        let SCALE_XY = 15;    
+
+        camera.position.set(200, 150, totalLength * SCALE_Z / 2);
+        camera.lookAt(0, 0, totalLength * SCALE_Z / 2);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        document.getElementById('canvas-container').appendChild(renderer.domElement);
+
+        // ==========================================
+        // ✨ 明确的起点坐标系与参考平面 (EXPLICIT ORIGIN & AXES)
+        // ==========================================
+        
+        // 1. 原点标记球 (Origin Sphere at 0,0,0)
+        const originGeo = new THREE.SphereGeometry(3, 16, 16);
+        const originMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+        const originMesh = new THREE.Mesh(originGeo, originMat);
+        originMesh.position.set(0, 0, 0);
+        scene.add(originMesh);
+
+        // 2. XYZ 三维正交坐标轴 (AxesHelper)
+        // 红色(Red)=X轴，绿色(Green)=Y轴，蓝色(Blue)=Z轴
+        const axesHelper = new THREE.AxesHelper(100);
+        axesHelper.position.set(0, 0, 0);
+        scene.add(axesHelper);
+
+        // 3. Z=0 处的发光起跑线平面 (Entrance Plane)
+        // 让截面起始点变得极为醒目
+        const startPlaneGeo = new THREE.PlaneGeometry(120, 120);
+        const startPlaneMat = new THREE.MeshBasicMaterial({ 
+            color: 0x38bdf8, 
+            transparent: true, 
+            opacity: 0.15, 
+            side: THREE.DoubleSide, 
+            depthWrite: false 
+        });
+        const startPlane = new THREE.Mesh(startPlaneGeo, startPlaneMat);
+        startPlane.position.set(0, 0, 0);
+        scene.add(startPlane);
+
+        // ==========================================
+
+        // 下沉网格，将其作为束流线正下方的“地板”参考
+        const gridHelper = new THREE.GridHelper(3000, 150, 0x1e293b, 0x0f172a);
+        gridHelper.position.set(0, -30, totalLength * SCALE_Z / 2);
+        scene.add(gridHelper);
+
+        scene.add(new THREE.AmbientLight(0xffffff, 0.7));
+        const dl = new THREE.DirectionalLight(0xffffff, 1);
+        dl.position.set(50, 100, 50);
+        scene.add(dl);
+
+        const matQPF = new THREE.MeshStandardMaterial({ color: 0xef4444, transparent:true, opacity: 0.8 });
+        const matQPD = new THREE.MeshStandardMaterial({ color: 0x3b82f6, transparent:true, opacity: 0.8 });
+        const matDipole = new THREE.MeshStandardMaterial({ color: 0x10b981, transparent: true, opacity: 0.6 });
+        const matDrift = new THREE.MeshStandardMaterial({ color: 0xa855f7, transparent: true, opacity: 0.45, emissive: 0x3b0764, emissiveIntensity: 0.6 });
+
+        beamline.forEach(el => {
+            let len = Math.max(el.length * SCALE_Z, 1); 
+            let geo, mat;
+            
+            if(el.type === 'drift') {
+                geo = new THREE.BoxGeometry(4, 4, len); 
+                mat = matDrift;
+            } else if(el.type === 'qpf' || el.type === 'qpd') {
+                geo = new THREE.BoxGeometry(12, 12, len);
+                mat = el.type === 'qpf' ? matQPF : matQPD;
+            } else if (el.type.includes('dipole')) {
+                geo = new THREE.BoxGeometry(24, 16, len);
+                mat = matDipole;
+            } else if (el.type === 'ip') {
+                geo = new THREE.SphereGeometry(10, 16, 16);
+                mat = new THREE.MeshStandardMaterial({ color: 0xfacc15, emissive: 0xfacc15, emissiveIntensity: 0.8 });
+            }
+
+            if(geo) {
+                let mesh = new THREE.Mesh(geo, mat);
+                mesh.position.z = (el.z_start + el.length/2) * SCALE_Z;
+                scene.add(mesh);
+            }
+        });
+
+        // ==========================================
+        // 5. ✨ 动态电子束初始生成器
+        // ==========================================
+        let NUM_TRACKS = 80;
+        const initialStates = [];
+        const trackLines = new THREE.Group();
+        scene.add(trackLines);
+        let trackPositions = []; 
+        let allStates = []; 
+        
+        const flyingGroup = new THREE.Group();
+        scene.add(flyingGroup);
+        let flyingMeshes = [];
+
+        function generateParticles() {
+            NUM_TRACKS = parseInt(document.getElementById('param-n').value);
+            let spread_x = parseFloat(document.getElementById('param-sx').value);
+            let spread_y = parseFloat(document.getElementById('param-sy').value);
+            let spread_d = parseFloat(document.getElementById('param-sd').value);
+
+            while(trackLines.children.length > 0){ trackLines.remove(trackLines.children[0]); }
+            while(flyingGroup.children.length > 0){ flyingGroup.remove(flyingGroup.children[0]); }
+
+            initialStates.length = 0;
+            trackPositions = [];
+            allStates = [];
+            flyingMeshes = [];
+
+            const sGeo = new THREE.SphereGeometry(2, 8, 8);
+
+            for(let i=0; i<NUM_TRACKS; i++) {
+                let x = (Math.random()+Math.random()+Math.random()-1.5)*2 * spread_x;
+                let xp = (Math.random()-0.5) * 0.1 * spread_x;
+                let y = (Math.random()+Math.random()+Math.random()-1.5)*2 * spread_y;
+                let yp = (Math.random()-0.5) * 0.1 * spread_y;
+                let delta = (Math.random()+Math.random()+Math.random()-1.5)*2 * spread_d; 
+                
+                let color = new THREE.Color();
+                if(delta > spread_d*0.3) color.setHex(0xef4444); 
+                else if(delta < -spread_d*0.3) color.setHex(0x3b82f6); 
+                else color.setHex(0x10b981); 
+
+                initialStates.push({ v: [x, xp, y, yp, 0, delta], color });
+
+                let pts = new Float32Array((LATTICE_TOTAL + 1) * 3); 
+                let geo = new THREE.BufferGeometry();
+                geo.setAttribute('position', new THREE.BufferAttribute(pts, 3));
+                let mat = new THREE.LineBasicMaterial({ color: color, transparent: true, opacity: 0.25, blending: THREE.AdditiveBlending });
+                trackLines.add(new THREE.Line(geo, mat));
+                trackPositions.push(pts);
+                allStates.push(new Array(LATTICE_TOTAL + 1));
+
+                let m = new THREE.Mesh(sGeo, new THREE.MeshBasicMaterial({ color: 0xffffff }));
+                m.visible = false;
+                flyingGroup.add(m);
+                flyingMeshes.push(m);
+            }
+            
+            recalculateGlobalTracks();
+        }
+
+        ['param-n', 'param-sx', 'param-sy', 'param-sd'].forEach(id => {
+            document.getElementById(id).addEventListener('input', (e) => {
+                let lbl = document.getElementById('lbl-' + id.split('-')[1]);
+                let val = parseFloat(e.target.value);
+                if(id === 'param-n') lbl.innerText = `Electrons (N): ${val}`;
+                if(id === 'param-sx') lbl.innerText = `X Spread (Std): ${val.toFixed(1)}`;
+                if(id === 'param-sy') lbl.innerText = `Y Spread (Std): ${val.toFixed(1)}`;
+                if(id === 'param-sd') lbl.innerText = `Energy Sprd (δ): ${val.toFixed(1)}`;
+                
+                generateParticles();
+            });
+        });
+
+        let diagnosticData = [];
+
+        function recalculateGlobalTracks() {
+            let scaleEl = document.getElementById('visual-scale');
+            SCALE_XY = scaleEl ? parseFloat(scaleEl.value) : 15;
+            
+            let currentStates = initialStates.map(p => [...p.v]);
+
+            for(let p=0; p<NUM_TRACKS; p++) {
+                allStates[p][0] = [...currentStates[p]];
+                trackPositions[p][0] = currentStates[p][0] * SCALE_XY;
+                trackPositions[p][1] = currentStates[p][2] * SCALE_XY;
+                trackPositions[p][2] = 0;
+            }
+
+            let globalZ = 0;
+            for(let i=0; i<LATTICE_TOTAL; i++) {
+                let el = beamline[i];
+                let M = getTransferMatrix(el);
+                globalZ += el.length;
+                let zScaled = globalZ * SCALE_Z;
+
+                for(let p=0; p<NUM_TRACKS; p++) {
+                    let nextV = mult6x1(M, currentStates[p]);
+                    currentStates[p] = nextV;
+                    allStates[p][i+1] = [...nextV];
+                    
+                    let ptIdx = (i + 1) * 3;
+                    trackPositions[p][ptIdx] = nextV[0] * SCALE_XY;     
+                    trackPositions[p][ptIdx+1] = nextV[2] * SCALE_XY;   
+                    trackPositions[p][ptIdx+2] = zScaled;               
+                }
+            }
+
+            for(let p=0; p<NUM_TRACKS; p++) {
+                trackLines.children[p].geometry.attributes.position.needsUpdate = true;
+            }
+
+            let timelineEl = document.getElementById('z-timeline');
+            if (timelineEl) {
+                sliceDataAtZ(parseFloat(timelineEl.value));
+            }
+        }
+
+        // ==========================================
+        // 6. 2D 诊断切片与 Twiss 计算挂载
+        // ==========================================
+        function sliceDataAtZ(targetZ) {
+            let elIdx = 0;
+            for(let i=0; i<beamline.length; i++) {
+                if(targetZ <= beamline[i].z_end) {
+                    elIdx = i;
+                    break;
+                }
+            }
+            if(elIdx >= beamline.length) elIdx = beamline.length - 1;
+
+            let el = beamline[elIdx];
+            let frac = (targetZ - el.z_start) / el.length;
+            if (isNaN(frac) || frac < 0) frac = 0;
+            if (frac > 1) frac = 1;
+
+            diagnosticData = [];
+            let currentSliceStates = []; 
+
+            for(let p=0; p<NUM_TRACKS; p++) {
+                let s1 = allStates[p][elIdx];
+                let s2 = allStates[p][elIdx+1];
+                let x = s1[0] + (s2[0]-s1[0])*frac;
+                let xp = s1[1] + (s2[1]-s1[1])*frac;
+                let y = s1[2] + (s2[2]-s1[2])*frac;
+                let yp = s1[3] + (s2[3]-s1[3])*frac;
+                let z = s1[4] + (s2[4]-s1[4])*frac;
+                let delta = s1[5] + (s2[5]-s1[5])*frac;
+                
+                currentSliceStates.push([x, xp, y, yp, z, delta]);
+                diagnosticData.push({ x: x, y: y, color: initialStates[p].color.getStyle() });
+            }
+            
+            drawDiagnosticScreen();
+
+            let twiss = computeTwissLive(currentSliceStates);
+            if(twiss) {
+                document.getElementById('tw-std-x').innerText = twiss.x.std.toFixed(2);
+                document.getElementById('tw-a-x').innerText = twiss.x.alpha.toFixed(2);
+                document.getElementById('tw-b-x').innerText = twiss.x.beta.toFixed(2);
+                document.getElementById('tw-g-x').innerText = twiss.x.gamma.toFixed(2);
+                document.getElementById('tw-e-x').innerText = twiss.x.eps.toExponential(2);
+                document.getElementById('tw-phi-x').innerText = twiss.x.phi.toFixed(2);
+                document.getElementById('tw-env-x').innerText = twiss.x.env.toFixed(2);
+                document.getElementById('tw-d-x').innerText = twiss.x.D.toFixed(3);
+                
+                document.getElementById('tw-std-y').innerText = twiss.y.std.toFixed(2);
+                document.getElementById('tw-a-y').innerText = twiss.y.alpha.toFixed(2);
+                document.getElementById('tw-b-y').innerText = twiss.y.beta.toFixed(2);
+                document.getElementById('tw-g-y').innerText = twiss.y.gamma.toFixed(2);
+                document.getElementById('tw-e-y').innerText = twiss.y.eps.toExponential(2);
+                document.getElementById('tw-phi-y').innerText = twiss.y.phi.toFixed(2);
+                document.getElementById('tw-env-y').innerText = twiss.y.env.toFixed(2);
+                document.getElementById('tw-d-y').innerText = twiss.y.D.toFixed(3);
+            }
+        }
+
+        // ==========================================
+        // 7. FIRE BEAM ANIMATION
+        // ==========================================
+        let isFiring = false;
+        let fireProgress = 0; 
+
+        document.getElementById('btn-fire').addEventListener('click', () => {
+            isFiring = true;
+            fireProgress = 0;
+            flyingMeshes.forEach(m => m.visible = true);
+        });
+
+        // ==========================================
+        // 8. 2D PROFILE MONITOR CANVAS RENDERER
+        // ==========================================
+        const diagCanvas = document.getElementById('screen-canvas');
+        const ctx = diagCanvas.getContext('2d');
+        
+        function drawDiagnosticScreen() {
+            diagCanvas.width = diagCanvas.clientWidth;
+            diagCanvas.height = diagCanvas.clientHeight;
+            let w = diagCanvas.width, h = diagCanvas.height, cx = w/2, cy = h/2;
+
+            ctx.fillStyle = '#0b1120'; ctx.fillRect(0, 0, w, h);
+            ctx.strokeStyle = '#334155'; ctx.lineWidth = 1;
+            ctx.beginPath(); ctx.moveTo(cx, 0); ctx.lineTo(cx, h); ctx.moveTo(0, cy); ctx.lineTo(w, cy); ctx.stroke();
+
+            let plotScale = (Math.min(w, h) / 2) / 10; 
+
+            diagnosticData.forEach(pt => {
+                let px = cx + pt.x * plotScale * (SCALE_XY / 10);
+                let py = cy - pt.y * plotScale * (SCALE_XY / 10);
+                
+                ctx.fillStyle = pt.color;
+                ctx.beginPath(); ctx.arc(px, py, 2, 0, Math.PI*2); ctx.fill();
+            });
+
+            ctx.fillStyle = '#64748b'; ctx.font = '10px sans-serif';
+            ctx.fillText('+Y', cx + 5, 12); ctx.fillText('-Y', cx + 5, h - 5);
+            ctx.fillText('-X', 5, cy - 5); ctx.fillText('+X', w - 15, cy - 5);
+        }
+
+        let scaleEl = document.getElementById('visual-scale');
+        if (scaleEl) {
+            scaleEl.addEventListener('input', (e) => {
+                document.getElementById('val-scale').innerText = e.target.value + 'x';
+                recalculateGlobalTracks();
+            });
+        }
+
+        const zTimeline = document.getElementById('z-timeline');
+        const zLabel = document.getElementById('current-z-label');
+        
+        zTimeline.addEventListener('input', (e) => {
+            let z = parseFloat(e.target.value);
+            zLabel.innerText = `Monitor Z: ${z.toFixed(2)} m`;
+            if (document.getElementById('cam-follow').checked) {
+                camTargetZ = z * SCALE_Z;
+            }
+            sliceDataAtZ(z);
+        });
+
+        // ==========================================
+        // 9. RENDER LOOP & MOUSE SCROLL ZOOM
+        // ==========================================
+        let isDragging = false;
+        let spherical = new THREE.Spherical(350, Math.PI/3, Math.PI/4);
+        let camTargetZ = 0; 
+        
+        document.addEventListener('mousedown', (e) => { 
+            if(!e.target.closest('.panel') && !e.target.closest('.toggle-btn') && !e.target.closest('#ai-modal')) {
+                isDragging = true; 
+            }
+        });
+        document.addEventListener('mouseup', () => { isDragging = false; });
+        document.addEventListener('mousemove', (e) => {
+            if (isDragging) {
+                spherical.theta -= e.movementX * 0.005;
+                spherical.phi -= e.movementY * 0.005;
+                spherical.phi = Math.max(0.1, Math.min(Math.PI - 0.1, spherical.phi));
+            }
+        });
+        
+        document.addEventListener('wheel', (e) => {
+            if(!e.target.closest('.panel') && !e.target.closest('#ai-modal')) {
+                spherical.radius += e.deltaY * 0.5;
+                spherical.radius = Math.max(50, Math.min(2000, spherical.radius));
+            }
+        });
+
+        generateParticles();
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            if (isFiring) {
+                let elIdx = Math.floor(fireProgress);
+                let frac = fireProgress - elIdx;
+                
+                if (elIdx >= LATTICE_TOTAL) {
+                    isFiring = false;
+                    flyingMeshes.forEach(m => m.visible = false);
+                } else {
+                    let el = beamline[elIdx];
+                    let currentZ = (el.z_start + el.length * frac);
+                    
+                    for(let p=0; p<NUM_TRACKS; p++) {
+                        let state1 = allStates[p][elIdx];
+                        let state2 = allStates[p][elIdx+1];
+                        
+                        let x = state1[0] + (state2[0] - state1[0]) * frac;
+                        let y = state1[2] + (state2[2] - state1[2]) * frac;
+                        
+                        flyingMeshes[p].position.set(x * SCALE_XY, y * SCALE_XY, currentZ * SCALE_Z);
+                        flyingMeshes[p].material.color.lerpColors(new THREE.Color(0xffffff), initialStates[p].color, 0.5);
+                    }
+                    
+                    zTimeline.value = currentZ;
+                    zLabel.innerText = `Monitor Z: ${currentZ.toFixed(2)} m`;
+                    if (document.getElementById('cam-follow').checked) camTargetZ = currentZ * SCALE_Z;
+                    sliceDataAtZ(currentZ);
+
+                    fireProgress += 0.5; 
+                }
+            }
+
+            let target = new THREE.Vector3(0, 0, camTargetZ);
+            let offset = new THREE.Vector3().setFromSpherical(spherical);
+            camera.position.copy(target).add(offset);
+            camera.lookAt(target);
+
+            renderer.render(scene, camera);
+        }
+        animate();
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            drawDiagnosticScreen();
+        });
+    </script>
+</body>
+</html>

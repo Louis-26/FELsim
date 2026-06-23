@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Accelerator Beamline Elements 3D</title>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #0f172a; color: #f8fafc; font-family: system-ui, -apple-system, sans-serif; }
+        #canvas-container { width: 100vw; height: 100vh; display: block; }
+        #ui-panel {
+            position: absolute; top: 20px; left: 20px; width: 360px;
+            background: rgba(30, 41, 59, 0.85); backdrop-filter: blur(12px);
+            padding: 20px; border-radius: 12px; border: 1px solid #334155;
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5); z-index: 10;
+        }
+        h2 { margin-top: 0; font-size: 1.2rem; border-bottom: 1px solid #475569; padding-bottom: 10px; color: #38bdf8; }
+        .control-group { margin-bottom: 15px; }
+        label { display: block; font-size: 0.9rem; margin-bottom: 5px; font-weight: 500; }
+        select, input[type=range] { width: 100%; padding: 8px; border-radius: 6px; background: #0f172a; color: white; border: 1px solid #475569; }
+        input[type=range] { padding: 0; cursor: pointer; accent-color: #38bdf8; }
+        .btn { 
+            width: 100%; padding: 10px; background: #0ea5e9; color: white; border: none; 
+            border-radius: 6px; font-weight: bold; cursor: pointer; margin-top: 10px; transition: 0.2s;
+        }
+        .btn:hover { background: #0284c7; }
+        .info-box {
+            margin-top: 15px; padding: 12px; background: rgba(0, 0, 0, 0.4);
+            border-radius: 8px; font-size: 0.85rem; line-height: 1.5; color: #cbd5e1;
+        }
+        .desc-title { color: #facc15; font-weight: bold; margin-bottom: 5px; }
+        
+        /* Coordinate System Legend Styles */
+        .axes-legend {
+            margin-top: 15px; padding: 12px; background: rgba(0, 0, 0, 0.2);
+            border-radius: 8px; border: 1px dashed #475569;
+        }
+        .axes-title { font-size: 0.85rem; font-weight: bold; color: #e2e8f0; margin-bottom: 8px; }
+        .legend-row { display: flex; align-items: center; margin-bottom: 4px; font-size: 0.8rem; color: #94a3b8; }
+        .color-box { width: 14px; height: 14px; border-radius: 3px; margin-right: 8px; }
+        .cb-red { background-color: #ef4444; }
+        .cb-green { background-color: #22c55e; }
+        .cb-blue { background-color: #3b82f6; }
+    </style>
+</head>
+<body>
+
+    <div id="ui-panel">
+        <h2>3D Beam Dynamics Tracking</h2>
+        
+        <div class="control-group">
+            <label for="element-select">Select Lattice Element</label>
+            <select id="element-select">
+                <option value="drift">Drift Space</option>
+                <option value="qpf">QPF (Quadrupole Focusing)</option>
+                <option value="qpd">QPD (Quadrupole Defocusing)</option>
+                <option value="dipole">Dipole (Standard Bending)</option>
+                <option value="dipole_wedge">Dipole Wedge (Edge Focusing)</option>
+            </select>
+        </div>
+
+        <div class="control-group">
+            <label>Field Strength (Current / K / Angle)</label>
+            <input type="range" id="strength-slider" min="0" max="100" value="50">
+        </div>
+
+        <button class="btn" id="fire-btn">Fire Electron Beam</button>
+
+        <div class="info-box" id="info-box">
+            <div class="desc-title" id="desc-title">Drift Space</div>
+            <div id="desc-text">Field-free region. The electron beam drifts inertially; the transverse envelope expands based on initial divergence (x', y').</div>
+        </div>
+
+        <!-- Added Coordinate System Legend -->
+        <div class="axes-legend">
+            <div class="axes-title">Coordinate System (Right-Handed)</div>
+            <div class="legend-row">
+                <div class="color-box cb-red"></div>
+                <span><b>X-Axis (Red):</b> Horizontal Transverse</span>
+            </div>
+            <div class="legend-row">
+                <div class="color-box cb-green"></div>
+                <span><b>Y-Axis (Green):</b> Vertical Transverse</span>
+            </div>
+            <div class="legend-row">
+                <div class="color-box cb-blue"></div>
+                <span><b>Z-Axis (Blue):</b> Longitudinal Direction (s)</span>
+            </div>
+        </div>
+    </div>
+
+    <div id="canvas-container"></div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script>
+        const descriptions = {
+            drift: { 
+                title: "Drift Space", 
+                text: "Field-free region. The electron beam drifts inertially; the transverse beam envelope simply expands based on initial particle divergence (x', y')." 
+            },
+            qpf: { 
+                title: "QPF (Horizontal Focusing Quadrupole)", 
+                text: "The Lorentz force pushes particles towards the center in the horizontal plane (X-focusing) but pushes them outward in the vertical plane (Y-defocusing)." 
+            },
+            qpd: { 
+                title: "QPD (Horizontal Defocusing Quadrupole)", 
+                text: "Opposite to QPF. The beam is defocused in the horizontal plane (X) and focused in the vertical plane (Y)." 
+            },
+            dipole: { 
+                title: "Dipole (Standard Bending Magnet)", 
+                text: "Provides a uniform vertical magnetic field. The beam bends in the horizontal plane (X), introducing dispersion based on energy spread. No vertical (Y) focusing occurs." 
+            },
+            dipole_wedge: { 
+                title: "Dipole Wedge (Rectangular Dipole)", 
+                text: "In addition to horizontal bending, the angled pole faces (fringe fields) introduce a strong vertical restoring force, causing significant focusing in the Y plane!" 
+            }
+        };
+
+        // Init Scene
+        const scene = new THREE.Scene();
+        scene.fog = new THREE.FogExp2(0x0f172a, 0.0015);
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 1, 2000);
+        camera.position.set(-200, 150, 300);
+        camera.lookAt(0, 0, 0);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        document.getElementById('canvas-container').appendChild(renderer.domElement);
+
+        // Lights & Environment
+        scene.add(new THREE.GridHelper(1000, 100, 0x334155, 0x1e293b));
+        
+        // Add Coordinate Axes (X: Red, Y: Green, Z: Blue)
+        const axesHelper = new THREE.AxesHelper(100);
+        // Make the axes lines thicker for better visibility
+        axesHelper.material.linewidth = 3;
+        scene.add(axesHelper);
+        
+        scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+        const dirLight = new THREE.DirectionalLight(0xffffff, 1);
+        dirLight.position.set(100, 200, 50);
+        scene.add(dirLight);
+
+        // Element Magnet Group
+        let magnetGroup = new THREE.Group();
+        scene.add(magnetGroup);
+
+        const materials = {
+            n_pole: new THREE.MeshStandardMaterial({ color: 0xef4444, metalness: 0.5, roughness: 0.2 }), // Red
+            s_pole: new THREE.MeshStandardMaterial({ color: 0x3b82f6, metalness: 0.5, roughness: 0.2 }), // Blue
+            dipole: new THREE.MeshStandardMaterial({ color: 0x10b981, metalness: 0.4, roughness: 0.3, transparent: true, opacity: 0.8 }), // Green
+            drift: new THREE.MeshBasicMaterial({ color: 0xffffff, wireframe: true, transparent: true, opacity: 0.2 })
+        };
+
+        function buildMagnetModel(type) {
+            // Clear old models
+            while(magnetGroup.children.length > 0) { 
+                magnetGroup.remove(magnetGroup.children[0]); 
+            }
+            const length = 100;
+            const radius = 25;
+
+            if (type === 'drift') {
+                const geo = new THREE.CylinderGeometry(radius, radius, length, 16);
+                const mesh = new THREE.Mesh(geo, materials.drift);
+                mesh.rotation.x = Math.PI / 2;
+                magnetGroup.add(mesh);
+            } 
+            else if (type === 'qpf' || type === 'qpd') {
+                // Quadrupole (4 poles)
+                const poleGeo = new THREE.CylinderGeometry(8, 8, length, 16);
+                const pos = 22;
+                // QPF: X plane is N-pole focusing (Red), Y plane is S-pole defocusing (Blue). QPD reversed.
+                const matX = type === 'qpf' ? materials.n_pole : materials.s_pole;
+                const matY = type === 'qpf' ? materials.s_pole : materials.n_pole;
+
+                // Left & Right (X axis)
+                const p1 = new THREE.Mesh(poleGeo, matX); p1.position.x = pos; p1.rotation.x = Math.PI/2;
+                const p2 = new THREE.Mesh(poleGeo, matX); p2.position.x = -pos; p2.rotation.x = Math.PI/2;
+                // Top & Bottom (Y axis)
+                const p3 = new THREE.Mesh(poleGeo, matY); p3.position.y = pos; p3.rotation.x = Math.PI/2;
+                const p4 = new THREE.Mesh(poleGeo, matY); p4.position.y = -pos; p4.rotation.x = Math.PI/2;
+                
+                magnetGroup.add(p1, p2, p3, p4);
+                
+                // Outer shell
+                const shellGeo = new THREE.TubeGeometry(new THREE.LineCurve3(new THREE.Vector3(0,0,-length/2), new THREE.Vector3(0,0,length/2)), 1, 35, 16, false);
+                magnetGroup.add(new THREE.Mesh(shellGeo, materials.drift));
+            }
+            else if (type === 'dipole') {
+                // Standard Dipole
+                const geo = new THREE.BoxGeometry(60, 40, length);
+                const mesh = new THREE.Mesh(geo, materials.dipole);
+                magnetGroup.add(mesh);
+            }
+            else if (type === 'dipole_wedge') {
+                // Dipole with Wedge Angle
+                const shape = new THREE.Shape();
+                shape.moveTo(-30, -50); 
+                shape.lineTo(30, -30); // Slanted entrance (Wedge angle)
+                shape.lineTo(30, 30);  // Slanted exit
+                shape.lineTo(-30, 50); 
+                shape.lineTo(-30, -50);
+                
+                const extrudeSettings = { depth: 40, bevelEnabled: false };
+                const geo = new THREE.ExtrudeGeometry(shape, extrudeSettings);
+                const mesh = new THREE.Mesh(geo, materials.dipole);
+                mesh.rotation.x = Math.PI / 2;
+                mesh.rotation.z = Math.PI / 2;
+                mesh.position.y = -20; 
+                magnetGroup.add(mesh);
+            }
+        }
+
+        // Particle System
+        const numParticles = 300;
+        let particles = [];
+        let particleMeshes = new THREE.Group();
+        scene.add(particleMeshes);
+
+        const pGeo = new THREE.SphereGeometry(1.5, 8, 8);
+        const pMat = new THREE.MeshBasicMaterial({ color: 0xfacc15 });
+
+        function initParticles() {
+            while(particleMeshes.children.length > 0){ particleMeshes.remove(particleMeshes.children[0]); }
+            particles = [];
+            
+            for (let i = 0; i < numParticles; i++) {
+                // Gaussian-like initial distribution (x, x', y, y', delta)
+                const rX = (Math.random() + Math.random() + Math.random() - 1.5) * 6;
+                const rY = (Math.random() + Math.random() + Math.random() - 1.5) * 6;
+                const rXp = (Math.random() - 0.5) * 0.05;
+                const rYp = (Math.random() - 0.5) * 0.05;
+                const rDelta = (Math.random() - 0.5) * 0.2; // Energy Spread (z')
+
+                particles.push({
+                    x0: rX, xp0: rXp, y0: rY, yp0: rYp, delta: rDelta,
+                    x: rX, y: rY, z: -150, active: false
+                });
+
+                const mesh = new THREE.Mesh(pGeo, pMat);
+                mesh.position.set(rX, rY, -150);
+                mesh.visible = false;
+                particleMeshes.add(mesh);
+            }
+        }
+
+        // Physics Engine: Simplified analytical matrix tracking
+        let isFiring = false;
+        let currentS = -150; // Z-coordinate represents longitudinal path (s)
+        let currentType = 'drift';
+
+        function trackPhysicsStep(s, type, strengthFactor) {
+            const magnetStart = -50;
+            const magnetEnd = 50;
+            const L = magnetEnd - magnetStart;
+            
+            // Basic strength parameters
+            let k = strengthFactor * 0.0005; // Quadrupole strength (k)
+            let rho = 2000 / Math.max(1, strengthFactor); // Dipole bending radius
+            let k_edge = strengthFactor * 0.0002; // Vertical edge focusing strength
+
+            for (let i = 0; i < numParticles; i++) {
+                let p = particles[i];
+                
+                // 1. Before Magnet (Drift Space)
+                if (s <= magnetStart) {
+                    let ds = s - (-150);
+                    p.x = p.x0 + p.xp0 * ds;
+                    p.y = p.y0 + p.yp0 * ds;
+                }
+                // 2. Inside Magnet (Matrix Transformations)
+                else if (s > magnetStart && s <= magnetEnd) {
+                    let ds_pre = magnetStart - (-150);
+                    let x_in = p.x0 + p.xp0 * ds_pre;
+                    let y_in = p.y0 + p.yp0 * ds_pre;
+                    let xp_in = p.xp0;
+                    let yp_in = p.yp0;
+
+                    let z_mag = s - magnetStart; // Local coordinate inside magnet
+
+                    if (type === 'drift') {
+                        p.x = x_in + xp_in * z_mag;
+                        p.y = y_in + yp_in * z_mag;
+                    } 
+                    else if (type === 'qpf') {
+                        // X Focusing (cos, sin), Y Defocusing (cosh, sinh)
+                        let sqrtK = Math.sqrt(k);
+                        p.x = x_in * Math.cos(sqrtK * z_mag) + (xp_in / sqrtK) * Math.sin(sqrtK * z_mag);
+                        p.y = y_in * Math.cosh(sqrtK * z_mag) + (yp_in / sqrtK) * Math.sinh(sqrtK * z_mag);
+                    }
+                    else if (type === 'qpd') {
+                        // X Defocusing, Y Focusing
+                        let sqrtK = Math.sqrt(k);
+                        p.x = x_in * Math.cosh(sqrtK * z_mag) + (xp_in / sqrtK) * Math.sinh(sqrtK * z_mag);
+                        p.y = y_in * Math.cos(sqrtK * z_mag) + (yp_in / sqrtK) * Math.sin(sqrtK * z_mag);
+                    }
+                    else if (type === 'dipole') {
+                        // Horizontal bending + Dispersion (delta term M16)
+                        p.x = x_in + xp_in * z_mag + (z_mag * z_mag) / (2 * rho) + p.delta * 20 * (z_mag/L); 
+                        p.y = y_in + yp_in * z_mag; // No effect on Y
+                    }
+                    else if (type === 'dipole_wedge') {
+                        // Horizontal bending + Vertical Edge Focusing
+                        p.x = x_in + xp_in * z_mag + (z_mag * z_mag) / (2 * rho) + p.delta * 20 * (z_mag/L); 
+                        let sqrtKy = Math.sqrt(k_edge);
+                        p.y = y_in * Math.cos(sqrtKy * z_mag) + (yp_in / sqrtKy) * Math.sin(sqrtKy * z_mag);
+                    }
+                    
+                    // Store exit parameters for subsequent drift
+                    if (s === magnetEnd || s > magnetEnd - 2) {
+                        p.x_out = p.x;
+                        p.y_out = p.y;
+                        p.xp_out = (p.x - p.x_prev) / 2; // Simple numerical derivative
+                        p.yp_out = (p.y - p.y_prev) / 2;
+                    }
+                }
+                // 3. After Magnet (Drift Space)
+                else {
+                    let ds_post = s - magnetEnd;
+                    if(p.x_out !== undefined) {
+                        p.x = p.x_out + p.xp_out * ds_post;
+                        p.y = p.y_out + p.yp_out * ds_post;
+                    }
+                }
+                
+                p.x_prev = p.x;
+                p.y_prev = p.y;
+
+                particleMeshes.children[i].position.set(p.x, p.y, s);
+                particleMeshes.children[i].visible = true;
+            }
+        }
+
+        // UI Logic
+        const selectEl = document.getElementById('element-select');
+        const titleEl = document.getElementById('desc-title');
+        const textEl = document.getElementById('desc-text');
+        const sliderEl = document.getElementById('strength-slider');
+
+        selectEl.addEventListener('change', (e) => {
+            currentType = e.target.value;
+            buildMagnetModel(currentType);
+            titleEl.innerText = descriptions[currentType].title;
+            textEl.innerText = descriptions[currentType].text;
+            initParticles();
+            currentS = -150;
+            isFiring = false;
+            // Draw initial state
+            for(let i=0; i<numParticles; i++) particleMeshes.children[i].visible = false;
+        });
+
+        document.getElementById('fire-btn').addEventListener('click', () => {
+            initParticles();
+            currentS = -150;
+            isFiring = true;
+        });
+
+        // Simple Camera Orbit Controls
+        let isDragging = false;
+        let spherical = new THREE.Spherical().setFromVector3(camera.position);
+        document.addEventListener('mousedown', (e) => { if(!e.target.closest('#ui-panel')) isDragging = true; });
+        document.addEventListener('mouseup', () => { isDragging = false; });
+        document.addEventListener('mousemove', (e) => {
+            if (isDragging) {
+                spherical.theta -= e.movementX * 0.005;
+                spherical.phi -= e.movementY * 0.005;
+                camera.position.setFromSpherical(spherical);
+                camera.lookAt(0,0,0);
+            }
+        });
+
+        // Main Loop
+        buildMagnetModel('drift');
+        initParticles();
+
+        function animate() {
+            requestAnimationFrame(animate);
+
+            if (isFiring) {
+                currentS += 2.5; // Particle longitudinal velocity
+                let strength = parseFloat(sliderEl.value);
+                trackPhysicsStep(currentS, currentType, strength);
+
+                if (currentS > 200) {
+                    isFiring = false; // Stop when off-screen
+                }
+            }
+
+            renderer.render(scene, camera);
+        }
+        animate();
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>

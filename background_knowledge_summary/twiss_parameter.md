@@ -31,8 +31,9 @@ ellipse rotates and stretches — but its area $\pi \epsilon$ stays the same
 | $\beta$ | Half-width along $x$-axis is $\sqrt{\beta \epsilon}$ | m |
 | $\alpha$ | Tilt of the ellipse (slope of waist crossing) | dimensionless |
 | $\gamma$ | Half-height along $x'$-axis is $\sqrt{\gamma \epsilon}$ | rad/m |
+| $\epsilon$ | Area of ellipse / π | m·rad |
 
-## beta — beam size function
+## beta $\beta$ — beam size function
 
 $\beta_x(s)$ is the **squared beam size**, normalized by emittance. It tells you
 how wide the beam is at position $s$ in the $x$ direction:
@@ -58,7 +59,7 @@ which beam you push through it.
 
 ---
 
-## alpha — convergence/divergence indicator
+## alpha $\alpha$ — convergence/divergence indicator
 
 $\alpha_x(s)$ measures how $\beta_x$ is changing along the beamline:
 
@@ -86,7 +87,7 @@ smallest, most stable size as it enters the radiation section.
 
 ---
 
-## gamma — angular spread function
+## gamma $\gamma$ — angular spread function
 
 $\gamma_x(s)$ is the **squared angular divergence**, normalized by emittance:
 
@@ -110,7 +111,7 @@ in beam optics: focused beams diverge fast; collimated beams are wide.
 
 ---
 
-## emittance — beam quality
+## emittance $\epsilon$ — beam quality
 
 $\epsilon$ is the **phase-space area** occupied by the beam (divided by $\pi$):
 
@@ -148,7 +149,7 @@ In your FELsim code, `cal_twiss` returns geometric emittance in π·mm·mrad.
 What do you actually want $\beta, \alpha, \epsilon$ to be at the undulator
 entrance? This is the FEL matching problem.
 
-### Vertical: β_y is **forced** by undulator physics
+### Vertical: $\beta_y$ is **forced** by undulator physics
 
 Most planar undulators have a vertical magnetic gradient that produces
 **natural vertical focusing** — the undulator acts like a continuous weak
@@ -174,7 +175,7 @@ And **$\alpha_y = 0$** at the entrance, so the beam is at its waist exactly when
 it enters the natural-focusing regime. (Otherwise the waist forms inside the
 undulator, breaking matching.)
 
-### Horizontal: β_x is a **design choice**
+### Horizontal: $\beta_x$ is a **design choice**
 
 Planar undulators do **not** provide natural horizontal focusing — the field is
 uniform in $x$. So $\beta_x$ along the undulator just behaves like in a long
@@ -249,3 +250,142 @@ Notes:
 - Transverse: hard physics requirement for $\beta_y$, designer's choice for $\beta_x$
 - Longitudinal: no Twiss-style matching; instead bunch length and energy spread thresholds
 - Your FELsim scenarios optimize only the transverse part (5 of the 8 quantities above)
+
+
+## phi $\phi$ — phase advance / ellipse orientation
+
+`cal_twiss` computes:
+
+$$
+\phi = \frac{1}{2}\arctan\!\left(\frac{2\alpha}{\gamma - \beta}\right)
+$$
+
+returned in degrees.
+
+**What it measures**: the **orientation of the phase-space ellipse** — i.e. how
+much the $(x, x')$ ellipse is rotated relative to the coordinate axes. It comes
+from diagonalizing the ellipse's quadratic form (the rotation angle that aligns
+the ellipse's principal axes with the $(x, x')$ axes).
+
+**Relationship to $\alpha$**:
+- $\alpha = 0$ → ellipse axes aligned with $(x, x')$ → $\phi = 0$ (beam at a waist)
+- $\alpha \neq 0$ → ellipse tilted → $\phi \neq 0$
+
+So $\phi$ and $\alpha$ both encode the ellipse tilt, but differently: $\alpha$ is
+the Twiss tilt parameter, $\phi$ is the literal **geometric rotation angle** of
+the ellipse in degrees. $\phi$ is a derived diagnostic — it carries no
+information beyond $(\alpha, \beta, \gamma)$.
+
+**Two distinct meanings of "phase" — don't confuse them**:
+- The $\phi$ here is the **instantaneous ellipse orientation** at one location $s$
+  (a static geometric angle).
+- The **betatron phase advance** $\mu(s) = \int_0^s ds'/\beta(s')$ is a different
+  quantity — the accumulated oscillation phase as the beam travels, which governs
+  how many betatron oscillations fit in the lattice. `cal_twiss` returns the
+  former (ellipse orientation), **not** the integrated betatron phase. Despite the
+  variable name `phi`, this is the per-location ellipse tilt, computed purely from
+  the local second moments.
+
+**Practical use**: mostly a diagnostic. When you optimize $\alpha = 0$, you are
+implicitly driving $\phi \to 0$ as well (upright ellipse = waist). You won't
+usually target $\phi$ directly.
+
+---
+
+## envelope — RMS beam size in physical units
+
+`cal_twiss` doesn't return this directly; `ebeam.envelope` computes it from the
+Twiss output:
+
+$$
+\text{envelope} = 10^{3} \cdot \sqrt{\epsilon \cdot \beta}
+$$
+
+(with $\epsilon$ converted to SI via the $10^{-6}$ factor in the code, and the
+$10^{3}$ putting the result in mm).
+
+**What it measures**: the **physical RMS beam size** $\sigma$ at that location —
+the actual half-width of the beam in millimeters, i.e. how big the beam *really
+is* on a screen.
+
+This is exactly the $\sigma_x = \sqrt{\beta_x \epsilon_x}$ relation from the
+$\beta$ section, packaged as a directly-usable number:
+
+$$
+\sigma_u = \sqrt{\beta_u \, \epsilon_u}
+$$
+
+**Why it's useful as a separate quantity**:
+- $\beta$ alone is a *lattice* property (doesn't know the beam's emittance)
+- $\epsilon$ alone is a *beam* property (doesn't know the focusing)
+- **envelope combines both** into the thing you physically observe — the beam
+  spot size. If you want "how many mm wide is the beam here," this is the number.
+
+**Practical use**: aperture / clearance checks (does the beam fit through the
+vacuum chamber, the undulator gap?), and beam-size matching targets stated in
+physical units rather than abstract Twiss. It's $\beta$ and $\epsilon$ expressed
+as something you can measure on a profile monitor.
+
+---
+
+## dispersion $D$ — position shift per unit energy deviation
+
+`cal_twiss` computes (for the transverse planes only):
+
+$$
+D = \frac{\langle u\,\delta \rangle}{\langle \delta^2 \rangle}
+= \frac{\mathrm{Cov}(u, \delta)}{\mathrm{Var}(\delta)}
+$$
+
+returned in mm. (`ebeam.disper` reads this $D$ column out of the Twiss table.)
+
+**What it measures**: how much the **closed orbit shifts per unit relative energy
+deviation** $\delta = \Delta p / p$. Physically — particles with different
+energies are bent by different amounts in dipoles (and kicked differently by
+off-center trajectories in quads), so a particle with energy offset $\delta$ sits
+at transverse position $D \cdot \delta$ away from the reference orbit:
+
+$$
+x(\delta) = x_\beta + D\,\delta
+$$
+
+where $x_\beta$ is the pure betatron part and $D\delta$ is the energy-dependent
+offset.
+
+**Why it matters / why `cal_twiss` corrects for it**:
+- Dispersion **inflates the apparent beam size**: a spread of energies $\sigma_\delta$
+  smears the beam transversely by $D \cdot \sigma_\delta$, even if the true
+  betatron emittance is small. The measured $\langle x^2 \rangle$ contains both
+  the real beam and this dispersive smearing.
+- This is precisely why `cal_twiss` does the **dispersion correction** (step 3):
+  it subtracts $D^2 \sigma_\delta$ from the variance before computing emittance,
+  so the reported $\epsilon$ is the *true* betatron emittance, not contaminated by
+  energy spread. Without this, a dispersive region would report a falsely large
+  emittance.
+
+**$D$ is computed only for x and y** (transverse). The longitudinal plane (z)
+keeps $D = 0$ by construction — dispersion is defined as transverse-position-vs-
+energy, which doesn't apply to the energy axis itself.
+
+**Practical use**:
+- At the undulator you usually want $D \approx 0$ (dispersion-free) — energy
+  spread shouldn't blow up the transverse beam size in the radiation section.
+- In a chicane/bunch-compressor, large $D$ (specifically $R_{56}$, its
+  longitudinal cousin) is *desired* — that's how energy chirp gets converted to
+  longitudinal compression. But at the FEL undulator, $D$ should close to zero.
+
+---
+
+## Where each lives in `cal_twiss`
+
+Quick map of which line in `cal_twiss` produces what:
+
+| Quantity | Source in `cal_twiss` | Returned via |
+|:---------|:----------------------|:-------------|
+| $\epsilon$ | `epsilon = sqrt(var_corr*var_prime_corr - covar_corr²)` | `ebeam.epsilon` |
+| $\alpha$ | `alpha = -covar_corr / epsilon` | `ebeam.alpha` |
+| $\beta$ | `beta = var_corr / epsilon` | `ebeam.beta` |
+| $\gamma$ | `gamma = var_prime_corr / epsilon` | `ebeam.gamma` |
+| $D, D'$ | `D[:2] = cov[idx[:2],5] / sigma_delta` | `ebeam.disper` |
+| $\phi$ | `phi = 0.5*atan2(2α, γ-β)` | `ebeam.phi` |
+| envelope | $10^3\sqrt{\epsilon\beta}$ (in `ebeam.envelope`, not `cal_twiss`) | `ebeam.envelope` |

@@ -194,12 +194,12 @@ class lattice:
         # print("val type before transform",type(val))
         if not isinstance(val, torch.Tensor):
             val=torch.tensor(val, dtype=torch.float64)
-        val = val.to(torch.float64)
+        # val = val.to(torch.float64)
         # transformation matrix M with the size 6*6, where the new particle P'=MP
         mat = self.getSymbolicMatrice(numeric = True, **kwargs)
 
         # transform into torch tensor
-        mat_tensor = mat.to(torch.float64).reshape(-1, 6)
+        mat_tensor = mat.reshape(-1, 6)
         # parallelized matrix multiplication
         new_val_tensor = torch.matmul(val, mat_tensor.T)
         new_val_tensor = new_val_tensor.cpu().numpy().tolist()
