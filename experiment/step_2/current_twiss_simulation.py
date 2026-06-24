@@ -50,10 +50,16 @@ PARTICLES = ebeam_obj.gen_6d_gaussian(
     N_PARTICLES,
 )
 
+
+# simulation
 for i in tqdm(range(1000), desc="Simulating Twiss Parameters", unit="trial"):
     currents = np.random.uniform(low=0.01, high=1.5, size=26)
     twiss_result = currents_to_twiss(bl, currents, PARTICLES, evaluation_pos=138, noise=False, sigma=None)
+    # with noise
+    sigma = torch.ones(len(currents)) * 1e-3
+    twiss_result_noisy = currents_to_twiss(bl, currents, PARTICLES, evaluation_pos=138, noise=True, sigma=sigma)
     tqdm.write(f"Trial {i + 1}/1000")
     tqdm.write(f"currents {i + 1}: {currents}")
     tqdm.write(f"twiss parameters {i + 1}:\n{twiss_result}")
+    tqdm.write(f"twiss parameters with current noise {i + 1}:\n{twiss_result_noisy}")
     tqdm.write("=" * 50)

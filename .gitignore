@@ -14,3 +14,5 @@ node_modules/
 git_script/
 .ipynb_checkpoints/
 .vscode/
+
+/SLURM_execution/

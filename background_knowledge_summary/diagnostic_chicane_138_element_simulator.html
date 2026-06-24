@@ -129,7 +129,7 @@
     <div class="panel" id="left-panel">
         <h2 style="margin-top: 20px;">Beam Initialization</h2>
         
-        <!-- 电子束 3D 初始分布控制器 -->
+        <!-- 3D Electron Beam Initial Distribution Controller -->
         <div class="setup-group">
             <div class="setup-row">
                 <span id="lbl-n">Electrons (N): 80</span>
@@ -149,6 +149,17 @@
             </div>
         </div>
 
+        <!-- Current Noise Injection Controller -->
+        <div class="setup-group" style="margin-top: 8px; border-top: 1px solid #334155; padding-top: 8px;">
+            <div class="setup-row" style="grid-column: span 2; flex-direction: row; align-items: center; justify-content: space-between;">
+                <button id="btn-noise-toggle" class="btn" style="padding: 6px 12px; font-size: 0.8rem; background-color: #475569; width: 100px;">Noise: OFF</button>
+                <div style="display: flex; flex-direction: column; width: 60%;">
+                    <span id="lbl-noise-std">Noise Std: 0.0010</span>
+                    <input type="range" id="param-noise-std" min="0" max="0.01" value="0.001" step="0.0001">
+                </div>
+            </div>
+        </div>
+
         <h2 style="margin-top: 5px;">Live Diagnostics</h2>
         <div class="legend-grid">
             <div class="legend-row"><div class="color-box cb-qpf"></div><span>QPF</span></div>
@@ -157,7 +168,7 @@
             <div class="legend-row"><div class="color-box cb-drift"></div><span>Drift</span></div>
         </div>
         
-        <!-- 明确的坐标系图例 -->
+        <!-- Explicit Coordinate System Legend -->
         <div style="font-size: 0.8rem; color:#e2e8f0; margin-bottom: 6px; font-weight: bold; border-top: 1px solid #334155; padding-top: 8px;">Coordinate System:</div>
         <div class="legend-grid">
             <div class="legend-row"><div class="color-box" style="background-color: #ef4444;"></div><span>X-Axis (Red)</span></div>
@@ -170,7 +181,7 @@
             <canvas id="screen-canvas"></canvas>
         </div>
 
-        <!-- 恢复丢失的 Visual Scale 滑块 -->
+        <!-- Restored Visual Scale Slider -->
         <div style="margin-top: 10px;">
             <label style="display:flex; justify-content:space-between; font-size:0.75rem; color:#cbd5e1;">
                 <span>Transverse Visual Multiplier</span> <span id="val-scale">15x</span>
@@ -178,7 +189,7 @@
             <input type="range" id="visual-scale" min="1" max="100" value="15">
         </div>
         
-        <!-- 实时 Twiss 参数监测面板 -->
+        <!-- Real-time Twiss Parameter Monitoring Panel -->
         <div class="twiss-container">
             <div style="color: #38bdf8; font-weight: bold; margin-bottom: 5px; font-size: 0.85rem;">Twiss Parameters @ Current Z</div>
             <table>
@@ -318,7 +329,7 @@
             return el;
         }
 
-        // 解析 138 个物理元件位置
+        // Parse 138 physical element positions
         const rawTerminal = `
         el   0  driftLattice          s_end=0.35878 m
         el   1  qpfLattice            s_end=0.44768 m
@@ -491,6 +502,41 @@
         document.getElementById('z-timeline').max = totalLength;
         document.getElementById('end-z-label').innerText = `End: ${totalLength.toFixed(2)}m`;
 
+        // ==========================================
+        // ✨ NOISE GENERATOR (Box-Muller Transform)
+        // ==========================================
+        let noiseEnabled = false;
+        let noiseStd = 0.001;
+
+        function generateGaussianNoise(mean, std) {
+            let u1 = Math.random();
+            let u2 = Math.random();
+            let z0 = Math.sqrt(-2.0 * Math.log(u1)) * Math.cos(2.0 * Math.PI * u2);
+            return z0 * std + mean;
+        }
+
+        const btnNoiseToggle = document.getElementById('btn-noise-toggle');
+        const paramNoiseStd = document.getElementById('param-noise-std');
+        const lblNoiseStd = document.getElementById('lbl-noise-std');
+
+        btnNoiseToggle.addEventListener('click', () => {
+            noiseEnabled = !noiseEnabled;
+            if (noiseEnabled) {
+                btnNoiseToggle.innerText = 'Noise: ON';
+                btnNoiseToggle.style.backgroundColor = '#ef4444'; // Red active state
+            } else {
+                btnNoiseToggle.innerText = 'Noise: OFF';
+                btnNoiseToggle.style.backgroundColor = '#475569'; // Default gray state
+            }
+            recalculateGlobalTracks();
+        });
+
+        paramNoiseStd.addEventListener('input', (e) => {
+            noiseStd = parseFloat(e.target.value);
+            lblNoiseStd.innerText = `Noise Std: ${noiseStd.toFixed(4)}`;
+            if (noiseEnabled) recalculateGlobalTracks();
+        });
+
 
         // ==========================================
         // 2. PHYSICS ENGINE (6x6) & TWISS CALCULATION
@@ -511,16 +557,19 @@
                 M[0][1] = L; M[2][3] = L;
             } 
             else if (el.type === 'qpf' || el.type === 'qpd') {
-                let K = Math.abs(el.k);
+                // Incorporate the unique noise value for this calculation round
+                let currentK = el.k + (el.currentNoise || 0);
+                let K = Math.abs(currentK);
+                
                 if (K < 1e-6) { M[0][1] = L; M[2][3] = L; return M; } 
                 let sqrtK = Math.sqrt(K);
                 let th = sqrtK * L;
                 let C = Math.cos(th), S = Math.sin(th), Ch = Math.cosh(th), Sh = Math.sinh(th);
 
-                if (el.type === 'qpf') { // 水平聚焦
+                if (el.type === 'qpf') { // Horizontal focusing
                     M[0][0] = C; M[0][1] = S/sqrtK; M[1][0] = -sqrtK*S; M[1][1] = C;
                     M[2][2] = Ch; M[2][3] = Sh/sqrtK; M[3][2] = sqrtK*Sh; M[3][3] = Ch;
-                } else { // 水平散焦
+                } else { // Horizontal defocusing
                     M[0][0] = Ch; M[0][1] = Sh/sqrtK; M[1][0] = sqrtK*Sh; M[1][1] = Ch;
                     M[2][2] = C; M[2][3] = S/sqrtK; M[3][2] = -sqrtK*S; M[3][3] = C;
                 }
@@ -540,20 +589,20 @@
         }
 
         // ==========================================
-        // ✨ JavaScript 版核心 Twiss 参数协方差分析器
+        // ✨ Core JavaScript Twiss Parameter Covariance Analyzer
         // ==========================================
         function computeTwissLive(particlesArray) {
             let N = particlesArray.length;
             if (N < 2) return null;
 
-            // 1. 计算均值 (Mean)
+            // 1. Calculate Mean
             let mean = [0,0,0,0,0,0];
             for(let i=0; i<N; i++) {
                 for(let j=0; j<6; j++) mean[j] += particlesArray[i][j];
             }
             for(let j=0; j<6; j++) mean[j] /= N;
 
-            // 2. 计算协方差矩阵 (Covariance Matrix)
+            // 2. Calculate Covariance Matrix
             let cov = Array(6).fill(0).map(()=>Array(6).fill(0));
             for(let i=0; i<N; i++) {
                 for(let r=0; r<6; r++) {
@@ -568,12 +617,12 @@
 
             let var_delta = cov[5][5] || 1e-15;
 
-            // 3. 计算各个平面的色散 (Dispersion) 与 Twiss
+            // 3. Calculate Dispersion and Twiss for each plane
             function getPlaneTwiss(idx_pos, idx_prime) {
                 let D = cov[idx_pos][5] / var_delta;
                 let Dp = cov[idx_prime][5] / var_delta;
                 
-                // 色散修正后的方差与协方差 (Dispersion correction)
+                // Variance and covariance after dispersion correction
                 let var_pos = cov[idx_pos][idx_pos] - D * D * var_delta;
                 let var_prime = cov[idx_prime][idx_prime] - Dp * Dp * var_delta;
                 let cov_mix = cov[idx_pos][idx_prime] - D * Dp * var_delta;
@@ -583,10 +632,10 @@
                 let beta = var_pos / eps;
                 let gamma = var_prime / eps;
                 
-                // 相位计算 (Phase Advance)
+                // Phase Advance calculation
                 let phi = 0.5 * Math.atan2(2 * alpha, gamma - beta) * (180 / Math.PI);
-                let env = Math.sqrt(eps * beta) * 1000; // 包络 (Envelope in mm)
-                let std = Math.sqrt(cov[idx_pos][idx_pos]); // 标准差
+                let env = Math.sqrt(eps * beta) * 1000; // Envelope in mm
+                let std = Math.sqrt(cov[idx_pos][idx_pos]); // Standard deviation
 
                 return { eps, alpha, beta, gamma, D, phi, env, std };
             }
@@ -676,7 +725,7 @@
             Suggest general rules of thumb on tuning upstream Quads (QPF/QPD) to achieve a waist. Please respond in English.`;
 
             showModal("✨ Diagnostics Request", `<div class="loader"></div> Sending phase space data to Niels (AI)...`);
-            const response = await fetchGemini(prompt, "You are Niels, a veteran accelerator physicist mentoring a student named 26号新秀. You analyze Twiss parameters and give practical tuning advice. Always respond in English.");
+            const response = await fetchGemini(prompt, "You are Niels, a veteran accelerator physicist mentoring a student named Rookie 26. You analyze Twiss parameters and give practical tuning advice. Always respond in English.");
             const formattedResp = response.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>').replace(/\n/g, '<br>');
             document.getElementById('ai-modal-body').innerHTML = formattedResp;
         });
@@ -699,24 +748,24 @@
         document.getElementById('canvas-container').appendChild(renderer.domElement);
 
         // ==========================================
-        // ✨ 明确的起点坐标系与参考平面 (EXPLICIT ORIGIN & AXES)
+        // ✨ Explicit Origin Coordinate System & Reference Plane (EXPLICIT ORIGIN & AXES)
         // ==========================================
         
-        // 1. 原点标记球 (Origin Sphere at 0,0,0)
+        // 1. Origin Sphere at 0,0,0
         const originGeo = new THREE.SphereGeometry(3, 16, 16);
         const originMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
         const originMesh = new THREE.Mesh(originGeo, originMat);
         originMesh.position.set(0, 0, 0);
         scene.add(originMesh);
 
-        // 2. XYZ 三维正交坐标轴 (AxesHelper)
-        // 红色(Red)=X轴，绿色(Green)=Y轴，蓝色(Blue)=Z轴
+        // 2. XYZ 3D Orthogonal Axes (AxesHelper)
+        // Red=X-Axis, Green=Y-Axis, Blue=Z-Axis
         const axesHelper = new THREE.AxesHelper(100);
         axesHelper.position.set(0, 0, 0);
         scene.add(axesHelper);
 
-        // 3. Z=0 处的发光起跑线平面 (Entrance Plane)
-        // 让截面起始点变得极为醒目
+        // 3. Luminous Starting Line Plane at Z=0 (Entrance Plane)
+        // Make the starting point highly visible
         const startPlaneGeo = new THREE.PlaneGeometry(120, 120);
         const startPlaneMat = new THREE.MeshBasicMaterial({ 
             color: 0x38bdf8, 
@@ -731,7 +780,7 @@
 
         // ==========================================
 
-        // 下沉网格，将其作为束流线正下方的“地板”参考
+        // Sunken grid, serving as a "floor" reference directly below the beamline
         const gridHelper = new THREE.GridHelper(3000, 150, 0x1e293b, 0x0f172a);
         gridHelper.position.set(0, -30, totalLength * SCALE_Z / 2);
         scene.add(gridHelper);
@@ -772,7 +821,7 @@
         });
 
         // ==========================================
-        // 5. ✨ 动态电子束初始生成器
+        // 5. ✨ Dynamic Electron Beam Initial Generator
         // ==========================================
         let NUM_TRACKS = 80;
         const initialStates = [];
@@ -851,6 +900,15 @@
             let scaleEl = document.getElementById('visual-scale');
             SCALE_XY = scaleEl ? parseFloat(scaleEl.value) : 15;
             
+            // Assign noise values for this specific simulation cycle
+            controllableQuads.forEach(el => {
+                if (noiseEnabled) {
+                    el.currentNoise = generateGaussianNoise(0, noiseStd);
+                } else {
+                    el.currentNoise = 0;
+                }
+            });
+
             let currentStates = initialStates.map(p => [...p.v]);
 
             for(let p=0; p<NUM_TRACKS; p++) {
@@ -890,7 +948,7 @@
         }
 
         // ==========================================
-        // 6. 2D 诊断切片与 Twiss 计算挂载
+        // 6. 2D Diagnostic Slice and Twiss Calculation Mounting
         // ==========================================
         function sliceDataAtZ(targetZ) {
             let elIdx = 0;
