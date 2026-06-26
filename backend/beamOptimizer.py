@@ -16,6 +16,9 @@ gpt"can you explain the parameters of a constraint parameter in scipy.minimize"
 #         2d list of particles and each indice can only appear once as a key
 
 import scipy.optimize as spo
+from torch._dynamo.variables import torch
+from torch.distributions import gamma
+
 from beamline import *
 from ebeam import beam
 import numpy as np
@@ -24,6 +27,7 @@ import timeit
 import matplotlib.pyplot as plt
 import matplotlib.lines as mlines
 import time
+
 
 # NOTE: EACH BEAMOPTIMIZER OBJECT AFTER INSTANTIATION SHOULD ONLY BE USED TO
 # RUN A CALC() FUNCTION ONE TIME, CODE HAS NOT BEEN MODIFIED YET BEYOND ONE CALC() FUNCTION CALL
@@ -36,7 +40,8 @@ import time
 
 
 class beamOptimizer:
-    def __init__(self, beamline, matrixVariables, use_log=False, log_epsilon=1e-13):
+    def __init__(self, beamline, matrixVariables,
+                 use_log=False, log_epsilon=1e-13, noise=False, sigma=None):
         """
         Constructor for beamline and particle values to optimize over for given y objectives and x variables
 
@@ -62,8 +67,10 @@ class beamOptimizer:
 
         self.matrixVariables = matrixVariables
         self.beamline = beamline
-        self.use_log=use_log
-        self.log_epsilon=log_epsilon
+        self.use_log = use_log
+        self.log_epsilon = log_epsilon
+        self.noise = noise
+        self.sigma = 1e-3*torch.ones(26) if sigma is None else sigma
 
     def _optiSpeed(self, variableVals):
         """
@@ -87,27 +94,24 @@ class beamOptimizer:
         mse = []
         numGoals = 0
 
-        #  Loop through beamline indices
         for i in range(len(segments)):
-            #  Check if indice is in segmentVar (x variable dictionary)
             if i in self.segmentVar:
                 try:
-                    #  Adjust the segment's x variable value according to its mathematical relationship
                     yFunc = self.segmentVar.get(i)[2]
-                    varIndex = self.variablesToOptimize.index(
-                        self.segmentVar.get(i)[0]
-                    )  #  Get the index of the x variable to use with
-                    newValue = yFunc(variableVals[varIndex])
+                    varIndex = self.variablesToOptimize.index(self.segmentVar.get(i)[0])
+
+                    if self.noise:
+                        newValue = yFunc(variableVals[varIndex]) + self.sigma[varIndex] * np.random.normal(loc=0, scale=1, size=1)
+                    else:
+                        newValue = yFunc(variableVals[varIndex])
                     param = self.segmentVar.get(i)[1]
-                    particles = np.array(
-                        segments[i].useMatrice(particles, **{param: newValue})
-                    )  # Apply matrice transformation with changed segment attribute value
-                except TypeError as e:
-                    raise ValueError(f"segment {i} has no parameter {param}")
+                    particles = np.array(segments[i].useMatrice(particles, **{param: newValue}))
+
+                except Exception as e:
+                    print(f"DEBUG ERROR: Failed at segment {i}, param={param}, error={e}")
+                    raise e
             else:
-                particles = np.array(
-                    segments[i].useMatrice(particles)
-                )  #  apply matrice transformation with static segment values
+                particles = np.array(segments[i].useMatrice(particles))
             #  Check if indice in objective dictionary
             if i in self.objectives:
                 for goalDict in self.objectives[i]:
@@ -117,14 +121,14 @@ class beamOptimizer:
                     mse.append(((stat - goalDict["goal"]) ** 2) * goalDict["weight"])
                     numGoals = numGoals + 1
                     stringForm = (
-                        "indice "
-                        + str(i)
-                        + ": "
-                        + goalDict["measure"][0]
-                        + " "
-                        + goalDict["measure"][1].__name__
+                            "indice "
+                            + str(i)
+                            + ": "
+                            + goalDict["measure"][0]
+                            + " "
+                            + goalDict["measure"][1].__name__
                     )
-                    self.trackGoals[stringForm].append(stat)  #  for plotting in calc()
+                    self.trackGoals[stringForm].append(stat)  # for plotting in calc()
 
         #  Calculate MSE
         difference = (np.sum(mse)) / numGoals
@@ -140,17 +144,17 @@ class beamOptimizer:
             return difference
 
     def calc(
-        self,
-        method,
-        segmentVar,
-        startPoint,
-        objectives,
-        jac=None,
-        callback=None,
-        options=None,
-        plotProgress=False,
-        plotBeam=False,
-        printResults=False,
+            self,
+            method,
+            segmentVar,
+            startPoint,
+            objectives,
+            jac=None,
+            callback=None,
+            options=None,
+            plotProgress=False,
+            plotBeam=False,
+            printResults=False,
     ):
         """
         optimizes beamline segment attribute values so y values are close to objective values as possible.
@@ -193,6 +197,7 @@ class beamOptimizer:
         self.segmentVar = segmentVar
         checkSet = set()
         self.variablesToOptimize = []
+        self.current_idx=list(self.segmentVar.keys())
         for indice in self.segmentVar:
             if indice < 0 or indice >= len(self.beamline):
                 raise IndexError(
@@ -271,27 +276,27 @@ class beamOptimizer:
             setattr(self.beamline[indice], segAttr, newVal)
             if printResults:
                 output += (
-                    "\nindice "
-                    + str(indice)
-                    + " new "
-                    + segAttr
-                    + " value: "
-                    + str(newVal)
+                        "\nindice "
+                        + str(indice)
+                        + " new "
+                        + segAttr
+                        + " value: "
+                        + str(newVal)
                 )
         if printResults:
             output += "\n\ny objectives:\n"
             for indice, value in self.objectives.items():
                 for obj in value:
                     output += (
-                        "indice "
-                        + str(indice)
-                        + ": "
-                        + obj["measure"][0]
-                        + " "
-                        + obj["measure"][1].__name__
-                        + " value of "
-                        + str(obj["measured"])
-                        + "\n"
+                            "indice "
+                            + str(indice)
+                            + ": "
+                            + obj["measure"][0]
+                            + " "
+                            + obj["measure"][1].__name__
+                            + " value of "
+                            + str(obj["measured"])
+                            + "\n"
                     )
             output += "Final difference: " + str(result.fun) + "\n"
             output += "\nTotal time: " + str(endTime - startTime) + " s\n"
@@ -518,7 +523,6 @@ class beamOptimizer:
                 self.variablesValues[index] = startPoint.get(var).get("start")
             if "bounds" in startPoint.get(var):
                 self.bounds[index] = startPoint.get(var).get("bounds")
-
 
     def evaluate(self, variableVals, segmentVar, startPoint, objectives) -> float:
         """

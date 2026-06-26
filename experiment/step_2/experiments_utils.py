@@ -117,7 +117,7 @@ def method_label(method, label=None):
 # ── Benchmark runner ────────────────────────────────────────────────
 def run_benchmark(scenario_name, beamline_slice_len, particles, seg_var, obj, bounds,
                   method, n_runs=5, SEED=42, seed_offset=0, jac=None, options=None, verbose=True, method_tag=None,
-                  use_log=False, use_epsilon=1e-13):
+                  use_log=False, use_epsilon=1e-13, noise=False, sigma=None):
     """Run beamOptimizer.calc() n_runs times from uniform-random starting currents."""
     var_names = list({seg_var[i][0] for i in seg_var})
     results = []
@@ -132,7 +132,7 @@ def run_benchmark(scenario_name, beamline_slice_len, particles, seg_var, obj, bo
               for v in var_names} # start point for all variables
         start_x = {v: sp[v]["start"] for v in var_names}
         obj_copy = copy.deepcopy(obj)
-        opti = beamOptimizer(bl, p, use_log=use_log, log_epsilon=use_epsilon)
+        opti = beamOptimizer(bl, p, use_log=use_log, log_epsilon=use_epsilon, noise=noise, sigma=sigma)
         t0 = time.perf_counter()
 
         try:
@@ -260,13 +260,17 @@ def plot_stat_convergence(results_by_tag, title="Convergence", figsize=None,
 
 
 def run_scenario_A(CURRENT_BOUNDS, EPSILON, N_RUNS_A, REF_I, A_OBJ, A_VARS, A_BEAMLINE_LEN, METHODS_A, SEED=42,
-                   scale="log",
-                   options=None, METHOD_OPTIONS={}, use_log=False, use_epsilon=1e-13):
+                   scale="log", options=None, METHOD_OPTIONS={},
+                   use_log=False, use_epsilon=1e-13, noise = False, sigma=None,
+                   ):
     A_BOUNDS = {"I": CURRENT_BOUNDS, "I2": CURRENT_BOUNDS}
     REF_I_1 = REF_I[0]
     REF_I_3 = REF_I[1]
     results_A = {}
     print(f"use_log: {use_log}")
+    print(f"use noise: {noise}")
+    if noise:
+        print(f"noise standard deviation: {sigma[0].item()}")
     for method_spec in METHODS_A:
         if len(method_spec) == 3:
             method, jac, label = method_spec
@@ -294,7 +298,9 @@ def run_scenario_A(CURRENT_BOUNDS, EPSILON, N_RUNS_A, REF_I, A_OBJ, A_VARS, A_BE
             options=options,
             method_tag=method_name,
             use_log=use_log,
-            use_epsilon=use_epsilon
+            use_epsilon=use_epsilon,
+            noise=noise,
+            sigma=sigma
         )
         # print(f"res: {res}")
         # if use_log:
@@ -302,13 +308,13 @@ def run_scenario_A(CURRENT_BOUNDS, EPSILON, N_RUNS_A, REF_I, A_OBJ, A_VARS, A_BE
         #         if np.isfinite(r["final_mse"]):
         #             r["final_mse"] = float(r["mse_curve"][-1])
         for r in res:
-            r["method_tag"] = tag
+            r["method_tag"] = method_name
         # print(f"updated res: {res}")
         # print(f"res:{res}")
         # if use_log:
         #     res["final_mse"] = np.exp(res["final_mse"]) - use_epsilon
 
-        results_A[tag] = res
+        results_A[method_name] = res
         # print(results_A)
     # Flatten and merge nested results into a single DataFrame
     df_A = results_to_df([r for v in results_A.values() for r in v])
@@ -390,10 +396,16 @@ def run_scenario_A(CURRENT_BOUNDS, EPSILON, N_RUNS_A, REF_I, A_OBJ, A_VARS, A_BE
     print(formatted_df.to_string(index=False, justify='center'))
     print("=" * 115)
 
+    if noise and sigma is not None:
+        exponent = int(np.log10(sigma[0].item()))
+        final_title = f"Scenario A: (Target MSE < {EPSILON}) - Noise $\\sigma = 10^{{{exponent}}}$"
+    else:
+        final_title = f"Scenario A: (Target MSE < {EPSILON}) - Noise Free"
     # Plot the final algorithm stability curve
     plot_stat_convergence(
         results_A,
-        title=f"Scenario A: Convergence Stability (Target MSE < {EPSILON})",
+        # title=f"Scenario A: (Target MSE < {EPSILON}) - noise level: {sigma[0].item()}" if sigma is not None else f"Scenario A: (Target MSE < {EPSILON})",
+        title=final_title,
         convergence_epsilon=EPSILON,
         scale=scale
     )
