@@ -12,3 +12,5 @@ TBD
 
 # Questions/Requests
 Just one observation, the Koa cluster can't support the request of too many cores, 24-core request will take three days to get assigned, which is not realistic enough. 
+
+Then compute the time for each step of sobol scanning, seeking the relationship between current variable number/number of objective and the time it takes.
