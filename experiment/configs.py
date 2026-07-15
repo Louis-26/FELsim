@@ -68,9 +68,19 @@ beamline_full = ExcelElements(EXCEL_PATH).create_beamline()
 CURRENT_BOUNDS = (0.01, 1.5)
 EPSILON = 1
 
-REF_I_1 = 0.8218
-REF_I_3 = 1.0430
-REF_I = [REF_I_1, REF_I_3]
+FELSIM_S1_CURRENTS = {
+     1: 0.8218,  3: 1.0430,
+    10: 3.8834,
+    16: 2.2396, 18: 4.9532, 20: 3.4258,
+    27: 4.6657,
+    33: 2.6942, 35: 2.6523, 37: 0.2768, 39: 0.2768, 41: 2.6523, 43: 2.6942,
+    50: 4.6739,
+    56: 3.1219, 58: 3.3129,
+    61: 5.1775, 63: 4.0434,
+    70: 4.6818,
+    76: 3.9336, 78: 4.0787, 80: 0.0139,
+    87: 1.3624, 93: 0.9452, 95: 2.8851, 97: 2.1921,
+}
 
 # parameter setting
 N_RUNS_A = 100
@@ -92,6 +102,9 @@ A_OBJ = {
     8: [{"measure": ["x", "alpha"], "goal": 0.0, "weight": 1.0}],
     9: [{"measure": ["y", "alpha"], "goal": 0.0, "weight": 1.0}],
 }
+
+noise = False
+sigma = None
 
 # optimizer parameters
 METHOD_OPTIONS = {

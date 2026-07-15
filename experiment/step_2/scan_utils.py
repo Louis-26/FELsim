@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(current_dir, "../../backend")))
 
 # Initialize the beamline
 from configs import *
-from experiments_utils import load_results
+from experiment.experiments_utils import load_results
 from ebeam import beam as ebeam_class
 from beamline import lattice
 from excelElements import ExcelElements

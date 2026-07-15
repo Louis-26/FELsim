@@ -1,5 +1,10 @@
 import torch
 import pickle
+from functools import partial
+import concurrent.futures
+from collections import defaultdict
+import pandas as pd
+import numpy as np
 
 torch.set_default_dtype(torch.float64)
 
@@ -28,7 +33,7 @@ CURRENT_DIR = os.getcwd()
 BACKEND_DIR = CURRENT_DIR if os.path.basename(CURRENT_DIR) == "backend" else os.path.abspath(
     os.path.join(CURRENT_DIR, "../../backend"))
 sys.path.insert(0, BACKEND_DIR)
-print(BACKEND_DIR)
+# print(BACKEND_DIR)
 # os.makedirs(os.path.join(CURRENT_DIR, "../../results"), exist_ok=True)
 
 import numpy as np
@@ -105,6 +110,8 @@ import copy
 import numpy as np
 import pandas as pd
 
+def identity_func(x):
+    return x
 
 def method_label(method, label=None):
     if label:
@@ -124,6 +131,7 @@ def run_benchmark(scenario_name, beamline_slice_len, particles, seg_var, obj, bo
     method_name = method_label(method, method_tag)
 
     for run_i in range(n_runs):
+        
         bl = ExcelElements(EXCEL_PATH).create_beamline()[:beamline_slice_len]
         p = particles.clone()
         rng = np.random.default_rng(SEED + seed_offset + run_i * 997)
@@ -142,8 +150,8 @@ def run_benchmark(scenario_name, beamline_slice_len, particles, seg_var, obj, bo
             wall = time.perf_counter() - t0
 
             result_x_dict = dict(zip(var_names, res.x))
-            i_1 = result_x_dict.get("I", np.nan)
-            i_3 = result_x_dict.get("I2", np.nan)
+            # i_1 = result_x_dict.get("I", np.nan)
+            # i_3 = result_x_dict.get("I2", np.nan)
 
             def safe_get_measured(idx):
                 if idx in opti.objectives and len(opti.objectives[idx]) > 0:
@@ -151,10 +159,10 @@ def run_benchmark(scenario_name, beamline_slice_len, particles, seg_var, obj, bo
                     return float(val.item() if hasattr(val, 'item') else val)
                 return np.nan
 
-            alpha_x = safe_get_measured(8)
-            alpha_y = safe_get_measured(9)
-
-            results.append({
+            # alpha_x = safe_get_measured(8)
+            # alpha_y = safe_get_measured(9)
+            
+            output_dict={
                 "run": run_i + 1, "method": method_name, "scenario": scenario_name,
                 "final_mse": (float(opti.plotMSE[-1]) if (use_log and opti.plotMSE) else float(res.fun)),
                 "nfev": int(getattr(res, 'nfev', len(opti.plotMSE))),
@@ -162,16 +170,26 @@ def run_benchmark(scenario_name, beamline_slice_len, particles, seg_var, obj, bo
                 "wall_time": round(wall, 3),
                 "mse_curve": list(opti.plotMSE), "success": bool(res.success),
                 "start_x": start_x, "result_x": result_x_dict,
-                "I_1": i_1, "I_3": i_3, "alpha_x": alpha_x, "alpha_y": alpha_y
-            })
+            }
+            
+            # include current values
+            for k, v in result_x_dict.items():
+                output_dict[k] = v
+            
+            # include measured
+            for eval_pos in obj.keys():
+                measured_val = safe_get_measured(eval_pos)
+                name=str(eval_pos)+"_"+"_".join(reversed(obj[eval_pos][0]["measure"]))
+                output_dict[name] = measured_val
+    
+            results.append(output_dict)
         except Exception as exc:
             wall = time.perf_counter() - t0
             results.append({
                 "run": run_i + 1, "method": method_name, "scenario": scenario_name,
                 "final_mse": float("nan"), "nfev": -1, "nit": -1,
                 "wall_time": round(wall, 3), "mse_curve": [], "success": False,
-                "start_x": start_x, "result_x": {}, "error": str(exc),
-                "I_1": np.nan, "I_3": np.nan, "alpha_x": np.nan, "alpha_y": np.nan
+                "start_x": start_x, "result_x": {}, "error": str(exc)
             })
             if verbose: print(f"  {method_name} run {run_i + 1} FAILED: {exc}")
             continue
@@ -179,12 +197,16 @@ def run_benchmark(scenario_name, beamline_slice_len, particles, seg_var, obj, bo
             print(f"  {method_name:22s}  run {run_i + 1}/{n_runs}  "
                   f"MSE={results[-1]['final_mse']:.3e}  nit={results[-1]['nit']:<3} "
                   f"nfev={results[-1]['nfev']:<4} t={wall:.2f}s")
+        if (run_i+1)%10==0:
+            print(f"{run_i+1}/{n_runs} runs completed for {method_name} in scenario {scenario_name}.")
     return results
 
 
-def results_to_df(results_list):
+def results_to_df(results_list, current_name=["I_1", "I_3"], evalPos_name=["alpha_x", "alpha_y"]):
     keep = ('run', 'method', 'scenario', 'method_tag', 'final_mse', 'nfev', 'nit',
-            'wall_time', 'success', 'I_1', 'I_3', 'alpha_x', 'alpha_y')
+            'wall_time', 'success', *current_name, *evalPos_name
+            # 'I_1', 'I_3', 'alpha_x', 'alpha_y'
+            )
     return pd.DataFrame([{k: r[k] for k in keep if k in r} for r in results_list])
 
 
@@ -259,17 +281,29 @@ def plot_stat_convergence(results_by_tag, title="Convergence", figsize=None,
     return ax
 
 
-def run_scenario_A(CURRENT_BOUNDS, EPSILON, N_RUNS_A, REF_I, A_OBJ, A_VARS, A_BEAMLINE_LEN, METHODS_A, SEED=42,
+def run_scenario_A(CURRENT_BOUNDS, EPSILON, N_RUNS_A, FELSIM_S1_CURRENTS, A_OBJ, A_VARS, A_BEAMLINE_LEN, METHODS_A, SEED=42,
                    scale="log", options=None, METHOD_OPTIONS={},
-                   use_log=False, use_epsilon=1e-13, noise = False, sigma=None,
+                   use_log=False, use_epsilon=1e-13, noise = False, sigma=None, plot_curve=True, verbose=True
                    ):
-    A_BOUNDS = {"I": CURRENT_BOUNDS, "I2": CURRENT_BOUNDS}
-    REF_I_1 = REF_I[0]
-    REF_I_3 = REF_I[1]
+    A_BOUNDS = {i[0]: CURRENT_BOUNDS for i in (A_VARS.values())}
+
+    # get current variables 
+    current_name=["I_"+str(i) for i in A_VARS.keys()]
+    
+    # get reference current value names 
+    ref_I_name = [
+        var_info[0]+"_ref" 
+        for var_info in A_VARS.values() 
+    ]
+    
+    # get evalPos_parameter for measured values
+    evalPos_parameter = [str(i)+"_"+"_".join(reversed(j[0]["measure"])) for i,j in A_OBJ.items()]
+    
     results_A = {}
-    print(f"use_log: {use_log}")
-    print(f"use noise: {noise}")
-    if noise:
+    if verbose:
+        print(f"use_log: {use_log}")
+        print(f"use noise: {noise}")
+    if noise and verbose:
         print(f"noise standard deviation: {sigma[0].item()}")
     for method_spec in METHODS_A:
         if len(method_spec) == 3:
@@ -280,7 +314,8 @@ def run_scenario_A(CURRENT_BOUNDS, EPSILON, N_RUNS_A, REF_I, A_OBJ, A_VARS, A_BE
         options = METHOD_OPTIONS.get(method_label(method, label), None)
         method_name = method_label(method, label)
         tag = method_name + ("+jac" if jac else "")
-        print(f"\n▶ Scenario A — {tag}  ({N_RUNS_A} runs)")
+        if verbose:
+            print(f"\n▶ Scenario A — {tag}  ({N_RUNS_A} runs)")
 
         # Execute benchmark (Note: passing 'jac' here prepares for PyTorch analytical gradients later)
         res = run_benchmark(
@@ -300,25 +335,18 @@ def run_scenario_A(CURRENT_BOUNDS, EPSILON, N_RUNS_A, REF_I, A_OBJ, A_VARS, A_BE
             use_log=use_log,
             use_epsilon=use_epsilon,
             noise=noise,
-            sigma=sigma
+            sigma=sigma,
+            verbose=verbose
         )
-        # print(f"res: {res}")
-        # if use_log:
-        #     for r in res:
-        #         if np.isfinite(r["final_mse"]):
-        #             r["final_mse"] = float(r["mse_curve"][-1])
+
         for r in res:
             r["method_tag"] = method_name
-        # print(f"updated res: {res}")
-        # print(f"res:{res}")
-        # if use_log:
-        #     res["final_mse"] = np.exp(res["final_mse"]) - use_epsilon
 
         results_A[method_name] = res
-        # print(results_A)
+    # print("results_A: ", results_A)
     # Flatten and merge nested results into a single DataFrame
-    df_A = results_to_df([r for v in results_A.values() for r in v])
-
+    df_A = results_to_df([r for v in results_A.values() for r in v], current_name, evalPos_parameter)
+    # print("df_A: ",df_A)
     # ==============================================================================
     # 🎯 CORE FIX: Patch the bug where derivative-free algorithms return negative iterations
     # ==============================================================================
@@ -328,9 +356,6 @@ def run_scenario_A(CURRENT_BOUNDS, EPSILON, N_RUNS_A, REF_I, A_OBJ, A_VARS, A_BE
     if 'nit' in df_A.columns and 'nfev' in df_A.columns:
         df_A.loc[df_A['nit'] < 0, 'nit'] = df_A.loc[df_A['nit'] < 0, 'nfev']
 
-    print("\n" + "=" * 115)
-    print(f" 🎯 SCENARIO A: Robustness (Tol < {EPSILON}) & Discovered Physics State vs Reference")
-    print("=" * 115)
 
     # 1. Core Evaluation: Check if each run successfully converged below the target MSE threshold
     df_A['is_converged'] = df_A['final_mse'] < EPSILON
@@ -355,19 +380,21 @@ def run_scenario_A(CURRENT_BOUNDS, EPSILON, N_RUNS_A, REF_I, A_OBJ, A_VARS, A_BE
     # 3. Extract the Champion Solution: Find the run with the lowest error for each method,
     #    extracting its exact hardware currents and resulting alpha observables.
     idx_best = df_A.groupby('method_tag')['final_mse'].idxmin()
-    best_runs = df_A.loc[idx_best, ['method_tag', 'I_1', 'I_3', 'alpha_x', 'alpha_y']].set_index('method_tag')
+    best_runs = df_A.loc[idx_best, ['method_tag', *current_name, *evalPos_parameter]].set_index('method_tag')
 
     # 4. Merge all statistical data
     final_summary = summary_stats.join(best_runs).reset_index()
 
-    # Inject the expert's gold-standard values to establish the Ground Truth
-    final_summary['I_1_ref'] = REF_I_1
-    final_summary['I_3_ref'] = REF_I_3
+    for k in A_VARS.keys():
+        final_summary[f"I_{k}_ref"] = FELSIM_S1_CURRENTS[k]
+        
 
+    
+    hybrid_curr_name = [item for pair in zip(current_name, ref_I_name) for item in pair]
     # Reorder columns: Place the AI-predicted currents right next to the expert's Reference values
     final_summary = final_summary[[
         'method_tag', 'conv_rate', 'nit_mean', 'nfev_mean', 'wall_time_mean',
-        'final_mse_mean', 'I_1_ref', 'I_1', 'I_3_ref', 'I_3', 'alpha_x', 'alpha_y'
+        'final_mse_mean', *hybrid_curr_name, *evalPos_parameter
     ]]
 
     # 5. Plain text formatted output to bypass Jupyter HTML rendering bugs (missing tables)
@@ -377,12 +404,14 @@ def run_scenario_A(CURRENT_BOUNDS, EPSILON, N_RUNS_A, REF_I, A_OBJ, A_VARS, A_BE
         'nfev_mean': '{:.1f}',
         'wall_time_mean': '{:.3f} s',
         'final_mse_mean': '{:.2e}',
-        'I_1_ref': '{:.4f} A',
-        'I_1': '{:.4f} A',
-        'I_3_ref': '{:.4f} A',
-        'I_3': '{:.4f} A',
-        'alpha_x': '{:.2e}',
-        'alpha_y': '{:.2e}'
+        # 'I_1_ref': '{:.4f} A',
+        # 'I_1': '{:.4f} A',
+        # 'I_3_ref': '{:.4f} A',
+        # 'I_3': '{:.4f} A',
+        # 'I_10': '{:.4f} A',
+        # 'I_10_ref': '{:.4f} A',
+        **{f'{current_name}': '{:.4f} A' for current_name in hybrid_curr_name},
+        **{f'{evalPos}': '{:.4f}' for evalPos in evalPos_parameter},
     }
 
     formatted_df = final_summary.copy()
@@ -393,8 +422,12 @@ def run_scenario_A(CURRENT_BOUNDS, EPSILON, N_RUNS_A, REF_I, A_OBJ, A_VARS, A_BE
             formatted_df[col] = formatted_df[col].apply(lambda x: fmt.format(x) if pd.notna(x) else "NaN")
 
     # Print the final beautifully aligned data table
-    print(formatted_df.to_string(index=False, justify='center'))
-    print("=" * 115)
+    if verbose:
+        print("\n" + "=" * 115)
+        print(f" 🎯 SCENARIO A: Robustness (Tol < {EPSILON}) & Discovered Physics State vs Reference")
+        print("=" * 115)
+        print(formatted_df.to_string(index=False, justify='center'))
+        print("=" * 115)
 
     if noise and sigma is not None:
         exponent = int(np.log10(sigma[0].item()))
@@ -402,21 +435,25 @@ def run_scenario_A(CURRENT_BOUNDS, EPSILON, N_RUNS_A, REF_I, A_OBJ, A_VARS, A_BE
     else:
         final_title = f"Scenario A: (Target MSE < {EPSILON}) - Noise Free"
     # Plot the final algorithm stability curve
-    plot_stat_convergence(
-        results_A,
-        # title=f"Scenario A: (Target MSE < {EPSILON}) - noise level: {sigma[0].item()}" if sigma is not None else f"Scenario A: (Target MSE < {EPSILON})",
-        title=final_title,
-        convergence_epsilon=EPSILON,
-        scale=scale
-    )
+    if plot_curve:
+        plot_stat_convergence(
+            results_A,
+            title=final_title,
+            convergence_epsilon=EPSILON,
+            scale=scale
+        )
     return results_A, df_A, final_summary
 
 
-def display_results(results_A, REF_I):
+def display_results(results_A, A_VARS, FELSIM_S1_CURRENTS, verbose=True):
     # ── Scenario A — Best optimised quadrupole currents per method ─────
-    print("─── Scenario A: Best Optimised Quadrupole Currents per Method ───")
-    print(f"{'Method':<22} {'Best MSE':>12} {'I (A)':>10} {'I2 (A)':>10}")
-    print("─" * 58)
+    var_names = [info[0] for info in A_VARS.values()]
+    if verbose:
+        print("─── Scenario A: Best Optimised Quadrupole Currents per Method ───")
+        header_str = f"{'Method':<22} {'Best MSE':>12} "
+        header_str += " ".join([f"{v} (A)".rjust(10) for v in var_names])
+        print(header_str)
+        print("─" * len(header_str))
     for tag, res_list in results_A.items():
         valid = [r for r in res_list
                  if r.get('result_x') and not np.isnan(r['final_mse'])]
@@ -424,11 +461,23 @@ def display_results(results_A, REF_I):
             print(f"  {tag:<20}  no valid run")
             continue
         best = min(valid, key=lambda r: r['final_mse'])
-        I = best['result_x'].get('I', float('nan'))
-        I2 = best['result_x'].get('I2', float('nan'))
-        print(f"  {tag:<20} {best['final_mse']:>12.4e} {I:>10.4f} {I2:>10.4f}")
-    print()
-    print(f"  Reference FELsim S1 currents: I={REF_I[0]:.4f} A,  I2={REF_I[1]:.4f} A")
+        # I = best['result_x'].get('I', float('nan'))
+        # I2 = best['result_x'].get('I2', float('nan'))
+        print(f"  {tag:<20} {best['final_mse']:>12.4e}", end="")
+        for name in var_names:
+            val = best['result_x'].get(name, float('nan'))
+            print(f" {val:>10.4f}", end="")      
+        
+        # print(f"  {tag:<20} {best['final_mse']:>12.4e} {I:>10.4f} {I2:>10.4f}")
+        print()
+    ref_str_list = [
+        f"{info[0]}={FELSIM_S1_CURRENTS.get(pos, float('nan')):.4f} A" 
+        for pos, info in A_VARS.items()
+    ]
+    
+    ref_str = ", ".join(ref_str_list)
+    
+    print(f"  Reference FELsim S1 currents: {ref_str}")
     # Mean best across all runs
     all_valid = [r for v in results_A.values() for r in v
                  if r.get('result_x') and not np.isnan(r['final_mse'])]
@@ -436,9 +485,15 @@ def display_results(results_A, REF_I):
         best_overall = min(all_valid, key=lambda r: r['final_mse'])
         print(f"\n  Overall best across all methods/runs:")
         print(f"    Method: {best_overall['method_tag']},  MSE={best_overall['final_mse']:.4e}")
-        print(f"    I={best_overall['result_x']['I']:.5f} A,  "
-              f"I2={best_overall['result_x']['I2']:.5f} A")
-
+        # print(f"    I={best_overall['result_x']['I']:.5f} A,  "
+        #       f"I2={best_overall['result_x']['I2']:.5f} A")
+        for name in var_names:
+            val = best_overall['result_x'][name]
+            print(f"    {name}={val:.4f} A", end="\t")
+     
+        return {name: best_overall['result_x'][name] for name in var_names}
+    else:
+        return 
 
 def save_results(results_A, df_A, final_summary, path):
     """
@@ -661,3 +716,169 @@ def plot_trajectories(landscape_path, trajectories_path):
     fig.suptitle('Scenario A: Convergence Trajectories per Method (5 shared random starts)',
                  fontsize=15, fontweight='bold')
     plt.show()
+
+
+from functools import partial
+import concurrent.futures
+from collections import defaultdict
+import pandas as pd
+import numpy as np
+
+
+def _benchmark_worker(task_params, A_BEAMLINE_LEN, PARTICLES, A_VARS, A_OBJ, A_BOUNDS, 
+                      SEED, METHOD_OPTIONS, use_log, use_epsilon, noise, sigma):
+    
+    method, jac, method_name, run_idx = task_params
+    options = METHOD_OPTIONS.get(method_name, None)
+    
+    try:
+        res = run_benchmark(
+            "A",
+            A_BEAMLINE_LEN,
+            PARTICLES,
+            A_VARS,
+            A_OBJ,
+            A_BOUNDS,
+            method=method,
+            n_runs=1,                  
+            SEED=SEED,
+            seed_offset=run_idx,       
+            jac=jac,
+            options=options,
+            method_tag=method_name,
+            use_log=use_log,
+            use_epsilon=use_epsilon,
+            noise=noise,
+            sigma=sigma,
+            verbose=False              
+        )
+        
+        r = res[0]
+        r["method_tag"] = method_name
+        return method_name, r, True
+        
+    except Exception as e:
+        return method_name, {"method_tag": method_name, "error": str(e)}, False
+    
+    
+def run_scenario_A_parallel(CURRENT_BOUNDS, EPSILON, N_RUNS_A, FELSIM_S1_CURRENTS, A_OBJ, A_VARS, A_BEAMLINE_LEN, METHODS_A, SEED=42,
+                   scale="log", METHOD_OPTIONS={},
+                   use_log=False, use_epsilon=1e-13, noise = False, sigma=None, plot_curve=True, verbose=True,
+                   max_cores=6):  
+    
+    A_BOUNDS = {i[0]: CURRENT_BOUNDS for i in (A_VARS.values())}
+    current_name = ["I_"+str(i) for i in A_VARS.keys()]
+    ref_I_name = [var_info[0]+"_ref" for var_info in A_VARS.values()]
+    evalPos_parameter = [str(i)+"_"+"_".join(reversed(j[0]["measure"])) for i,j in A_OBJ.items()]
+    
+    if verbose:
+        print(f"use_log: {use_log}")
+        print(f"use noise: {noise}")
+        if noise:
+            print(f"noise standard deviation: {sigma[0].item()}")
+        print(f"🚀 Utilizing {max_cores} cores, with {len(METHODS_A) * N_RUNS_A} tasks...")
+
+    tasks = []
+    for method_spec in METHODS_A:
+        if len(method_spec) == 3:
+            method, jac, label = method_spec
+        else:
+            method, jac = method_spec
+            label = None
+            
+        method_name = method_label(method, label)
+        
+        for run_idx in range(N_RUNS_A):
+            tasks.append((method, jac, method_name, run_idx))
+            
+    worker_func = partial(
+        _benchmark_worker, 
+        A_BEAMLINE_LEN=A_BEAMLINE_LEN, PARTICLES=PARTICLES, A_VARS=A_VARS, 
+        A_OBJ=A_OBJ, A_BOUNDS=A_BOUNDS, SEED=SEED, 
+        METHOD_OPTIONS=METHOD_OPTIONS, use_log=use_log, 
+        use_epsilon=use_epsilon, noise=noise, sigma=sigma
+    )
+
+    results_A = defaultdict(list)
+    
+    import time
+    t0 = time.time()
+    with concurrent.futures.ProcessPoolExecutor(max_workers=max_cores) as executor:
+        for method_name, result_dict, success in executor.map(worker_func, tasks):
+            if success:
+                results_A[method_name].append(result_dict)
+            else:
+                if verbose:
+                    print(f"⚠️ {method_name} Failed: {result_dict.get('error')}")
+                    
+    if verbose:
+        print(f"✅ {len(tasks)} finish with time cost: {time.time() - t0:.2f} seconds\n")
+
+    df_A = results_to_df([r for v in results_A.values() for r in v], current_name, evalPos_parameter)
+    
+    if 'nit' in df_A.columns and 'nfev' in df_A.columns:
+        df_A.loc[df_A['nit'] < 0, 'nit'] = df_A.loc[df_A['nit'] < 0, 'nfev']
+
+    df_A['is_converged'] = df_A['final_mse'] < EPSILON
+
+    def _geom_mean_converged(s):
+        conv = s[s < EPSILON]
+        return 10 ** np.log10(conv).mean() if len(conv) else np.nan
+
+    summary_stats = df_A.groupby('method_tag').agg(
+        conv_rate=('is_converged', 'mean'),
+        nit_mean=('nit', 'mean'),
+        nfev_mean=('nfev', 'mean'),
+        wall_time_mean=('wall_time', 'mean'),
+    ).join(
+        df_A.groupby('method_tag')['final_mse']
+        .apply(_geom_mean_converged)
+        .rename('final_mse_mean')
+    )
+
+    idx_best = df_A.groupby('method_tag')['final_mse'].idxmin().dropna() 
+    best_runs = df_A.loc[idx_best, ['method_tag', *current_name, *evalPos_parameter]].set_index('method_tag')
+    final_summary = summary_stats.join(best_runs).reset_index()
+
+    for k in A_VARS.keys():
+        final_summary[f"I_{k}_ref"] = FELSIM_S1_CURRENTS[k]
+        
+    hybrid_curr_name = [item for pair in zip(current_name, ref_I_name) for item in pair]
+    final_summary = final_summary[[
+        'method_tag', 'conv_rate', 'nit_mean', 'nfev_mean', 'wall_time_mean',
+        'final_mse_mean', *hybrid_curr_name, *evalPos_parameter
+    ]]
+
+    # 5. Plain text formatted output
+    format_dict = {
+        'conv_rate': '{:.0%}',
+        'nit_mean': '{:.1f}',
+        'nfev_mean': '{:.1f}',
+        'wall_time_mean': '{:.3f} s',
+        'final_mse_mean': '{:.2e}',
+        **{f'{curr}': '{:.4f} A' for curr in hybrid_curr_name},
+        **{f'{evalPos}': '{:.4f}' for evalPos in evalPos_parameter},
+    }
+
+    formatted_df = final_summary.copy()
+    for col, fmt in format_dict.items():
+        if col in formatted_df.columns:
+            formatted_df[col] = formatted_df[col].apply(lambda x: fmt.format(x) if pd.notna(x) else "NaN")
+
+    if verbose:
+        print("\n" + "=" * 115)
+        print(f" 🎯 SCENARIO A: Robustness (Tol < {EPSILON}) & Discovered Physics State vs Reference")
+        print("=" * 115)
+        print(formatted_df.to_string(index=False, justify='center'))
+        print("=" * 115)
+
+    if noise and sigma is not None:
+        exponent = int(np.log10(sigma[0].item()))
+        final_title = f"Scenario A: (Target MSE < {EPSILON}) - Noise $\\sigma = 10^{{{exponent}}}$"
+    else:
+        final_title = f"Scenario A: (Target MSE < {EPSILON}) - Noise Free"
+        
+    if plot_curve:
+        plot_stat_convergence(results_A, title=final_title, convergence_epsilon=EPSILON, scale=scale)
+        
+    return results_A, df_A, final_summary
