@@ -64,7 +64,6 @@ parameters_case_template = {
     "sigma": sigma,
     "plot_curve": False,
     "verbose": False,
-    "sample_num": sample_num,
     "threshold_1": 0.01,
     "threshold_2": 0.5,
 }
