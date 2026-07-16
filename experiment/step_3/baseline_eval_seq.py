@@ -44,7 +44,7 @@ A_OBJ_test_3 = {
 A_BEAMLINE_LEN = 13
 
 
-os.makedirs("../../results/benchmark_scan_multi", exist_ok=True)
+os.makedirs("../../results/benchmark_scan", exist_ok=True)
 
 
 parameters_case_template = {
@@ -85,14 +85,13 @@ def compute_parameters_case(
     run_baseline_sim(**parameters_case)
     t1 = time.time()
     print(
-        f"Total time cost for case {case_num} with multiprocessing of core number {max_cores_r} for optimization random start, \
-and core number {max_cores_s} for SOBOL scan: {t1-t0:.2f} seconds"
+        f"Total time cost for case {case_num} without multiprocessing: {t1-t0:.2f} seconds"
     )
 
 
-save_dir_1 = "../../results/benchmark_scan_multi/SOBOL_results_1.pkl"
-save_dir_2 = "../../results/benchmark_scan_multi/SOBOL_results_2.pkl"
-save_dir_3 = "../../results/benchmark_scan_multi/SOBOL_results_3.pkl"
+save_dir_1 = "../../results/benchmark_scan/SOBOL_results_1.pkl"
+save_dir_2 = "../../results/benchmark_scan/SOBOL_results_2.pkl"
+save_dir_3 = "../../results/benchmark_scan/SOBOL_results_3.pkl"
 
 
 if __name__ == "__main__":
