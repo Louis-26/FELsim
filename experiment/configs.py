@@ -1,16 +1,17 @@
 import os, sys
 import numpy as np
+
+
+# set the system path
+current_dir=os.getcwd()
+sys.path.insert(0, os.path.abspath(os.path.join(current_dir, "../backend")))
+
 from beamline import lattice
 from ebeam import beam as ebeam_class
 from beamline import lattice
 from excelElements import ExcelElements
 from beamOptimizer import beamOptimizer
 from evolutionPlotter import EvolutionPlotter
-
-# set the system path
-current_dir=os.getcwd()
-sys.path.insert(0, os.path.abspath(os.path.join(current_dir, "../backend")))
-
 # beamline configuration
 
 EXCEL_PATH = os.path.abspath(os.path.join(current_dir, "../../beam_excel/Beamline_elements_3.xlsx"))

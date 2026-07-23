@@ -4,7 +4,7 @@ import copy
 import time
 import pickle
 import os, sys
-current_dir=os.getcwd()
+current_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.abspath(os.path.join(current_dir, "../backend")))
 # print(sys.path)
 
