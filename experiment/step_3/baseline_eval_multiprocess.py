@@ -1,3 +1,12 @@
+"""
+Given the optimization problem in the beamline with both current variables and objectives
+1. Solve the optimization problem with different random starts (N_RUNS_A) to derive the corresponding optimal solutions for each random start
+2. For each optimal solution, perform a SOBOL scan to compute the weighted MSE, Jacobian, Jacobian_rank, Hessian, Hessian_GN, 
+and eigenvalues/eigenvectors of the Hessian both close to and far from the optimal solution.
+3. Save the results in a pickle file for further analysis.
+"""
+
+
 import os, sys
 import argparse
 current_dir = os.getcwd()
@@ -95,7 +104,6 @@ def compute_parameters_case(
             "sample_num": sample_num,
             "max_cores_s": max_cores_s,
             "max_cores_r": max_cores_r,
-            
         }
     )
     run_baseline_sim_parallel(**parameters_case)
