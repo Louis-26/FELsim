@@ -59,7 +59,7 @@ if __name__ == "__main__":
         n_cores = max(1, multiprocessing.cpu_count() - 1)
 
     print(f"🚀 Starting parallel computation, processing {sample_num} sample points using {n_cores} core(s)...")
-    t0 = time.time()
+    start_time = time.time()
     
     target_func = partial(evaluate_single_sample, A_VARS=A_VARS, A_OBJ=A_OBJ)
     
@@ -71,7 +71,7 @@ if __name__ == "__main__":
     
     t1 = time.time()
     print("=" * 50)
-    print(f"✅ Parallel scan completed! Total wall time: {t1-t0:.4f} seconds")
+    print(f"✅ Parallel scan completed! Total wall time: {time.time()-start_time:.4f} seconds")
     print(f"Number of valid data points: {len(output_list)}")
     print("=" * 50)
 

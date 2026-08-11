@@ -59,7 +59,7 @@ if __name__ == "__main__":
         n_cores = max(1, multiprocessing.cpu_count() - 1)
 
     print(f"🚀 Starting sequential computation, processing {sample_num} sample points")
-    t0 = time.time()
+    start_time = time.time()
     
     # target_func = partial(evaluate_single_sample, A_VARS=A_VARS, A_OBJ=A_OBJ)
     
@@ -69,12 +69,12 @@ if __name__ == "__main__":
     # output_list = results
     output_list, time_cost = total_scan_execution(A_VARS, A_OBJ, sample_num)
     print(output_list)
-    print(f"Total time cost: {time_cost}")
+
     t1 = time.time()
-    # print("=" * 50)
-    # print(f"✅ Parallel scan completed! Total wall time: {t1-t0:.4f} seconds")
-    # print(f"Number of valid data points: {len(output_list)}")
-    # print("=" * 50)
+    print("=" * 50)
+    print(f"✅ Parallel scan completed! Total wall time: {time.time()-start_time:.4f} seconds")
+    print(f"Number of valid data points: {len(output_list)}")
+    print("=" * 50)
     if args.save:
         with open("../../results/scan_parameters.pkl", "wb") as f:
             pickle.dump(
