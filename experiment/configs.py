@@ -66,7 +66,9 @@ beamline_slice_len=10
 beamline_full = ExcelElements(EXCEL_PATH).create_beamline()
 
 # beamline parameters
-CURRENT_BOUNDS = (0.01, 1.5)
+CURRENT_BOUNDS_A = (0.01, 1.5)
+CURRENT_BOUNDS_BC = (0.01, 5.0)
+
 EPSILON = 1
 
 FELSIM_S1_CURRENTS = {
@@ -84,7 +86,8 @@ FELSIM_S1_CURRENTS = {
 }
 
 # parameter setting
-N_RUNS_A = 100
+## scenario A
+N_RUNS_A = 1
 A_BEAMLINE_LEN = 10
 
 METHODS_A = [
@@ -95,15 +98,249 @@ METHODS_A = [
     ("trust-constr", "2-point"),
 ]
 
+def identity_func(x):
+    """Identity transform for a variable spec.
+
+    A module-level def, NOT a lambda: the variable specs are shipped to worker processes for
+    the multiprocessing runs, and lambdas/closures cannot be pickled.
+    """
+    return x
+
+
 A_VARS = {
-    1: ["I", "current", lambda x: x],
-    3: ["I2", "current", lambda x: x],
+    1: ["I", "current", identity_func],
+    3: ["I2", "current", identity_func],
 }
 A_OBJ = {
     8: [{"measure": ["x", "alpha"], "goal": 0.0, "weight": 1.0}],
     9: [{"measure": ["y", "alpha"], "goal": 0.0, "weight": 1.0}],
 }
 
+# ---- Bayesian-optimization budget ----
+N_INIT_A     = 5                      # random initial evaluations
+N_BO_STEPS_A = 30                     # BO iterations (1 FELsim evaluation per step)
+
+## scenario B
+METHODS_B = METHODS_A
+
+# scenario B setting (identical to scenario_A-C.ipynb)
+N_RUNS_B     = 1          # independent repetitions of the whole 11-stage pipeline
+N_INIT_B     = 3          # random initial evaluations per stage
+N_BO_STEPS_B = 25         # BO steps per stage (1 FELsim evaluation each)
+
+
+def _v(name):
+    """Variable spec understood by beamOptimizer: [name, attribute, x -> attribute value].
+
+    Uses the module-level `identity_func` rather than a lambda so that STAGES_B / C_VARS stay
+    picklable for the multiprocessing runs.
+    """
+    return [name, "current", identity_func]
+
+def get_stages_b(CURRENT_BOUNDS):
+    STAGES_B = [
+        (
+            "Stage 1 Doublet",
+            {1: _v("I"), 3: _v("I2")},
+            {
+                8: [
+                    {"measure": ["x", "alpha"], "goal": 0, "weight": 1},
+                    {"measure": ["x", "beta"], "goal": 0.1, "weight": 0.0},
+                ],
+                9: [
+                    {"measure": ["y", "alpha"], "goal": 0, "weight": 1},
+                    {"measure": ["y", "beta"], "goal": 0.1, "weight": 0.5},
+                ],
+            },
+            10,
+            {
+                "I": {"bounds": CURRENT_BOUNDS, "start": 1},
+                "I2": {"bounds": CURRENT_BOUNDS, "start": 1},
+            },
+        ),
+        (
+            "Stage 2 Chrom.1",
+            {10: _v("I")},
+            {15: [{"measure": ["x", "dispersion"], "goal": 0, "weight": 1}]},
+            16,
+            {"I": {"bounds": CURRENT_BOUNDS, "start": 1}},
+        ),
+        (
+            "Stage 3 Triplet1",
+            {16: _v("I"), 18: _v("I2"), 20: _v("I3")},
+            {
+                25: [
+                    {"measure": ["x", "alpha"], "goal": 0, "weight": 1},
+                    {"measure": ["x", "beta"], "goal": 0.1, "weight": 0.5},
+                ],
+                26: [
+                    {"measure": ["y", "alpha"], "goal": 0, "weight": 1},
+                    {"measure": ["y", "beta"], "goal": 0.1, "weight": 0.5},
+                ],
+            },
+            27,
+            {
+                "I": {"bounds": CURRENT_BOUNDS, "start": 2},
+                "I2": {"bounds": CURRENT_BOUNDS, "start": 5},
+                "I3": {"bounds": CURRENT_BOUNDS, "start": 3},
+            },
+        ),
+        (
+            "Stage 4 Chrom.2",
+            {27: _v("I")},
+            {32: [{"measure": ["x", "dispersion"], "goal": 0, "weight": 1}]},
+            33,
+            {"I": {"bounds": CURRENT_BOUNDS, "start": 1}},
+        ),
+        (
+            "Stage 5 DblTriplet",
+            {37: _v("I"), 35: _v("I2"), 33: _v("I3")},
+            {
+                37: [
+                    {"measure": ["x", "alpha"], "goal": 0, "weight": 1},
+                    {"measure": ["y", "alpha"], "goal": 0, "weight": 1},
+                    {"measure": ["x", "envelope"], "goal": 2.0, "weight": 1},
+                    {"measure": ["y", "envelope"], "goal": 2.0, "weight": 1},
+                ]
+            },
+            38,
+            {
+                "I": {"bounds": CURRENT_BOUNDS, "start": 0.28},
+                "I2": {"bounds": CURRENT_BOUNDS, "start": 2.65},
+                "I3": {"bounds": CURRENT_BOUNDS, "start": 2.69},
+            },
+        ),
+        (
+            "Stage 6 Chrom.3",
+            {50: _v("I")},
+            {55: [{"measure": ["x", "dispersion"], "goal": 0, "weight": 1}]},
+            56,
+            {"I": {"bounds": CURRENT_BOUNDS, "start": 1}},
+        ),
+        (
+            "Stage 7 IP",
+            {56: _v("I"), 58: _v("I2")},
+            {
+                59: [
+                    {"measure": ["x", "envelope"], "goal": 0.0, "weight": 1},
+                    {"measure": ["y", "envelope"], "goal": 0.0, "weight": 1},
+                ]
+            },
+            60,
+            {
+                "I": {"bounds": CURRENT_BOUNDS, "start": 2},
+                "I2": {"bounds": CURRENT_BOUNDS, "start": 2},
+            },
+        ),
+        (
+            "Stage 8 Doublet2",
+            {61: _v("I"), 63: _v("I2")},
+            {
+                68: [
+                    {"measure": ["x", "alpha"], "goal": 0, "weight": 1},
+                    {"measure": ["x", "beta"], "goal": 0.1, "weight": 0.5},
+                ],
+                69: [
+                    {"measure": ["y", "alpha"], "goal": 0, "weight": 1},
+                    {"measure": ["y", "beta"], "goal": 0.1, "weight": 0.5},
+                ],
+            },
+            70,
+            {
+                "I": {"bounds": CURRENT_BOUNDS, "start": 2},
+                "I2": {"bounds": CURRENT_BOUNDS, "start": 2},
+            },
+        ),
+        (
+            "Stage 9 Chrom.4",
+            {70: _v("I")},
+            {75: [{"measure": ["x", "dispersion"], "goal": 0, "weight": 1}]},
+            76,
+            {"I": {"bounds": CURRENT_BOUNDS, "start": 1}},
+        ),
+        (
+            "Stage 10 Triplet3",
+            {76: _v("I"), 78: _v("I2"), 80: _v("I3")},
+            {
+                85: [
+                    {"measure": ["x", "alpha"], "goal": 0, "weight": 1},
+                    {"measure": ["x", "beta"], "goal": 0.1, "weight": 0.5},
+                ],
+                86: [
+                    {"measure": ["y", "alpha"], "goal": 0, "weight": 1},
+                    {"measure": ["y", "beta"], "goal": 0.1, "weight": 0.5},
+                ],
+            },
+            87,
+            {
+                "I": {"bounds": CURRENT_BOUNDS, "start": 2},
+                "I2": {"bounds": CURRENT_BOUNDS, "start": 2},
+                "I3": {"bounds": CURRENT_BOUNDS, "start": 2},
+            },
+        ),
+        (
+            "Stage 11 UND Match",
+            {87: _v("Ic"), 93: _v("I"), 95: _v("I2"), 97: _v("I3")},
+            {
+                92: [{"measure": ["x", "dispersion"], "goal": 0, "weight": 0.5}],
+                117: [
+                    {"measure": ["x", "alpha"], "goal": ALPHA_XM, "weight": 1},
+                    {"measure": ["y", "alpha"], "goal": ALPHA_YM, "weight": 1},
+                    {"measure": ["x", "beta"], "goal": BETA_XM, "weight": 1},
+                    {"measure": ["y", "beta"], "goal": BETA_YM, "weight": 1},
+                ],
+            },
+            118,
+            {
+                "Ic": {"bounds": CURRENT_BOUNDS, "start": 4},
+                "I": {"bounds": CURRENT_BOUNDS, "start": 2},
+                "I2": {"bounds": CURRENT_BOUNDS, "start": 2},
+                "I3": {"bounds": CURRENT_BOUNDS, "start": 2},
+            },
+        ),
+    ]
+    return STAGES_B
+STAGES_B = get_stages_b(CURRENT_BOUNDS_BC)
+
+N_RUNS_B     = 1          # independent repetitions of the whole 11-stage pipeline
+N_INIT_B     = 3          # random initial evaluations per stage
+N_BO_STEPS_B = 25         # BO steps per stage (1 FELsim evaluation each)
+
+## scenario C
+METHODS_C = METHODS_A
+C_BEAMLINE_LEN = 118
+N_RUNS_C     = 1
+N_INIT_C     = 22        # random initial evaluations (= number of variables)
+N_BO_STEPS_C = 200        # BO steps (1 FELsim evaluation each)
+
+C_VARS = {
+    56: _v("I_56"), 58: _v("I_58"),
+    61: _v("I_61"), 63: _v("I_63"),
+    76: _v("I_76"), 78: _v("I_78"), 80: _v("I_80"),
+    87: _v("I_87"), 93: _v("I_93"), 95: _v("I_95"), 97: _v("I_97")
+}
+
+# Objectives: IP spot + UND beta matching
+C_OBJ = {
+    59: [
+        {"measure": ["x", "envelope"], "goal": 0.0, "weight": 1.0},
+        {"measure": ["y", "envelope"], "goal": 0.0, "weight": 1.0},
+    ],
+    117: [
+        {"measure": ["x", "alpha"], "goal": ALPHA_XM, "weight": 1.0},
+        {"measure": ["y", "alpha"], "goal": ALPHA_YM, "weight": 1.0},
+        {"measure": ["x", "beta"], "goal": BETA_XM, "weight": 1.0},
+        {"measure": ["y", "beta"], "goal": BETA_YM, "weight": 1.0},
+    ]
+}
+
+# XOpt
+XOPT_TAG = "Xopt-EI"       # 'method_tag' used in the result tables
+bl_full = ExcelElements(EXCEL_PATH).create_beamline()
+
+
+
+# model setting
 noise = False
 sigma = None
 
