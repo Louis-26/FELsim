@@ -34,17 +34,31 @@ THREE THINGS THAT SILENTLY BREAK MULTIPROCESSING HERE
 3. Importing `experiments_utils` costs ~25 s (PyTorch + the beamline Excel + the bunch). One
    persistent pool pays that once per worker; a pool per task would pay it every time.
 
+MEMORY IS USUALLY THE BINDING CONSTRAINT, NOT CORES
+---------------------------------------------------
+Every worker imports PyTorch, and on Windows a CUDA-enabled build maps its whole CUDA runtime
+at import time (~1.5 GB of commit charge per process, whether or not a GPU is used). Ask for
+more workers than the machine has memory for and the pool dies during start-up with
+`OSError: [WinError 1455] The paging file is too small for this operation to complete` while
+loading `torch\\lib\\*.dll` — several minutes into what may be an hours-long run.
+`safe_worker_count()` therefore caps the requested worker count by the memory actually
+available. Raise the ceiling by closing memory hogs (IDEs, browsers, idle Jupyter kernels) or
+by enlarging the Windows paging file; `MB_PER_WORKER` below is the per-worker estimate.
+
 Variable specs must stay picklable, which is why `configs._v()` / `configs.A_VARS` use the
 module-level `identity_func` instead of a lambda.
 """
 
 import concurrent.futures
 import copy
+import sys
 import time
 from functools import partial
 
 import numpy as np
 import pandas as pd
+
+from concurrent.futures.process import BrokenProcessPool
 
 from experiments_utils import (
     ExcelElements,
@@ -55,6 +69,88 @@ from experiments_utils import (
     method_label,
     plot_stat_convergence,
 )
+
+
+MB_PER_WORKER = 1500      # rough commit charge of one worker once PyTorch is imported
+
+
+def memory_headroom_mb():
+    """Memory a new process can actually commit, in MB (None if it cannot be determined).
+
+    On Windows the binding limit is the *commit charge*, not free RAM and not free page-file
+    space: `psutil.swap_memory().free` reports the page file's spare capacity (tens of GB here)
+    while `CommitLimit - CommitTotal` can be under 3 GB — take the page-file number and you
+    will happily launch 20 workers and watch them all die loading torch.
+    """
+    if sys.platform == "win32":
+        try:
+            import ctypes
+
+            class _PerfInfo(ctypes.Structure):
+                _fields_ = [("cb", ctypes.c_ulong), ("CommitTotal", ctypes.c_size_t),
+                            ("CommitLimit", ctypes.c_size_t), ("CommitPeak", ctypes.c_size_t),
+                            ("PhysicalTotal", ctypes.c_size_t), ("PhysicalAvailable", ctypes.c_size_t),
+                            ("SystemCache", ctypes.c_size_t), ("KernelTotal", ctypes.c_size_t),
+                            ("KernelPaged", ctypes.c_size_t), ("KernelNonpaged", ctypes.c_size_t),
+                            ("PageSize", ctypes.c_size_t), ("HandleCount", ctypes.c_ulong),
+                            ("ProcessCount", ctypes.c_ulong), ("ThreadCount", ctypes.c_ulong)]
+
+            info = _PerfInfo()
+            info.cb = ctypes.sizeof(_PerfInfo)
+            if not ctypes.windll.psapi.GetPerformanceInfo(ctypes.byref(info), info.cb):
+                return None
+            return (info.CommitLimit - info.CommitTotal) * info.PageSize / 2 ** 20
+        except Exception:  # noqa: BLE001
+            return None
+    try:
+        import psutil
+        return psutil.virtual_memory().available / 2 ** 20
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def safe_worker_count(requested, n_tasks=None, mb_per_worker=MB_PER_WORKER, verbose=True):
+    """Cap `requested` by the number of tasks and by the memory actually available.
+
+    Each worker maps the whole PyTorch (+CUDA) runtime, so an over-ambitious worker count does
+    not merely run slowly — it kills the pool during start-up with WinError 1455. Better to
+    lose some parallelism than to lose an hours-long run.
+    """
+    n = max(1, int(requested))
+    if n_tasks:
+        n = min(n, int(n_tasks))
+    headroom_mb = memory_headroom_mb()
+    if headroom_mb is None:
+        return n
+    affordable = max(1, int(headroom_mb // mb_per_worker))
+    if affordable < n:
+        if verbose:
+            print(f"⚠️  memory-capped: {n} -> {affordable} worker(s) — only "
+                  f"{headroom_mb / 1024:.1f} GB can be committed and each worker needs "
+                  f"~{mb_per_worker / 1024:.1f} GB for PyTorch.\n"
+                  f"    Close memory hogs (IDEs, browsers, idle Jupyter kernels) or enlarge "
+                  f"the Windows paging file to use more cores.")
+        n = affordable
+    return n
+
+
+def _pool_stream(iterator, n_workers):
+    """Yield from a pool's result iterator, turning a dead pool into an actionable message.
+
+    The usual cause here is not a bug but memory: each worker maps the whole PyTorch runtime,
+    and when Windows runs out of commit charge the workers die while loading `torch\\lib\\*.dll`
+    and the pool comes back as BrokenProcessPool / OSError.
+    """
+    try:
+        yield from iterator
+    except (BrokenProcessPool, OSError) as exc:
+        raise RuntimeError(
+            f"the worker pool died with {n_workers} workers ({type(exc).__name__}: {exc}).\n"
+            f"    Most likely the machine ran out of memory: every worker imports PyTorch "
+            f"(~{MB_PER_WORKER} MB of commit charge each).\n"
+            f"    Retry with a smaller --max_cores, close memory hogs (IDEs, browsers, idle "
+            f"Jupyter kernels), or enlarge the Windows paging file."
+        ) from exc
 
 
 # ── Workers (module level so they survive pickling into a spawned process) ──
@@ -275,7 +371,7 @@ def run_scenario_single_parallel(scenario, VARS, OBJ, BEAMLINE_LEN, CURRENT_BOUN
         for run_idx in range(N_RUNS):
             tasks.append((scenario, cfg, method, jac, name, run_idx))
 
-    n_workers = max(1, min(max_cores, len(tasks)))
+    n_workers = safe_worker_count(max_cores, len(tasks), verbose=verbose)
     if verbose:
         print(f"\n▶ 🚀 Scenario {scenario} — {len(METHODS)} methods x {N_RUNS} random starts "
               f"= {len(tasks)} tasks on {n_workers} cores")
@@ -285,7 +381,8 @@ def run_scenario_single_parallel(scenario, VARS, OBJ, BEAMLINE_LEN, CURRENT_BOUN
     results, ok_records, n_failed = {}, [], 0
     t0 = time.perf_counter()
     with concurrent.futures.ProcessPoolExecutor(max_workers=n_workers) as executor:
-        for done, (name, rec, ok) in enumerate(executor.map(worker, tasks), start=1):
+        stream = _pool_stream(executor.map(worker, tasks), n_workers)
+        for done, (name, rec, ok) in enumerate(stream, start=1):
             if ok:
                 results.setdefault(name, []).append(rec)
                 ok_records.append(rec)
@@ -331,7 +428,7 @@ def run_scenario_B_parallel(STAGES_B, PARTICLES, METHODS_B, N_RUNS_B=1, METHOD_O
         for run_idx in range(N_RUNS_B):
             tasks.append((STAGES_B, method, jac, name, run_idx))
 
-    n_workers = max(1, min(max_cores, len(tasks)))
+    n_workers = safe_worker_count(max_cores, len(tasks), verbose=verbose)
     if verbose:
         print(f"\n▶ 🚀 Scenario B (11-stage sequential) — {len(METHODS_B)} methods x {N_RUNS_B} runs "
               f"= {len(tasks)} pipelines on {n_workers} cores")
@@ -343,7 +440,8 @@ def run_scenario_B_parallel(STAGES_B, PARTICLES, METHODS_B, N_RUNS_B=1, METHOD_O
     results, all_records, finals, n_failed = {}, [], {}, 0
     t0 = time.perf_counter()
     with concurrent.futures.ProcessPoolExecutor(max_workers=n_workers) as executor:
-        for done, (name, recs, fin, ok) in enumerate(executor.map(worker, tasks), start=1):
+        stream = _pool_stream(executor.map(worker, tasks), n_workers)
+        for done, (name, recs, fin, ok) in enumerate(stream, start=1):
             results.setdefault(name, []).extend(recs)
             all_records.extend(recs)
             if ok:
